@@ -108,7 +108,7 @@ HTML_TEMPLATE = """
         th, td { border: 1px solid #ddd; padding: 12px; text-align: left; font-size: 14px; }
         th { background-color: var(--primary); color: white; position: sticky; top: 0; }
         tr:nth-child(even) { background-color: #f9f9f9; }
-        .alert { padding: 15px; margin-bottom: 20px; border-radius: 5px; color: white; font-weight: bold; }
+        .alert { padding: 15px; margin-bottom: 20px; border-radius: 5px; color: white; font-weight: bold; line-height: 1.5; }
         .alert.success { background-color: var(--success); }
         .alert.error { background-color: var(--danger); }
         .alert.info { background-color: var(--secondary); }
@@ -178,6 +178,16 @@ HTML_TEMPLATE = """
                 </div>
 
                 <div class="form-group">
+                    <label>Rede:</label>
+                    <select name="busca_rede">
+                        <option value="">Todas as Redes</option>
+                        {% for rede in lista_redes %}
+                            <option value="{{ rede }}" {% if request.args.get('busca_rede') == rede %}selected{% endif %}>{{ rede }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+
+                <div class="form-group">
                     <label>Data de Vigência:</label>
                     <input type="date" name="busca_vigencia" value="{{ request.args.get('busca_vigencia', '') }}">
                 </div>
@@ -199,6 +209,7 @@ HTML_TEMPLATE = """
             <form action="/exportar" method="POST">
                 <input type="hidden" name="busca_uf" value="{{ request.args.get('busca_uf', '') }}">
                 <input type="hidden" name="busca_municipio" value="{{ request.args.get('busca_municipio', '') }}">
+                <input type="hidden" name="busca_rede" value="{{ request.args.get('busca_rede', '') }}">
                 <input type="hidden" name="busca_vigencia" value="{{ request.args.get('busca_vigencia', '') }}">
                 <input type="hidden" name="busca_odonto" value="{{ request.args.get('busca_odonto', '') }}">
                 <button type="submit" class="btn btn-export">📥 Exportar Tabela para Excel</button>
@@ -228,32 +239,25 @@ HTML_TEMPLATE = """
             if (ufSelecionada && mapaUfs[ufSelecionada]) {
                 municipiosDisponiveis = mapaUfs[ufSelecionada];
             } else {
-                // Se "Todas" estiver selecionado, carrega tudo
                 Object.values(mapaUfs).forEach(lista => {
                     municipiosDisponiveis = municipiosDisponiveis.concat(lista);
                 });
             }
 
-            // Remove duplicados e ordena alfabeticamente
             municipiosDisponiveis = [...new Set(municipiosDisponiveis)].sort();
 
-            // Adiciona as opções no datalist
             municipiosDisponiveis.forEach(mun => {
                 let option = document.createElement('option');
                 option.value = mun;
                 datalistMunicipios.appendChild(option);
             });
             
-            // Limpa o campo de município se a UF mudar e ele não pertencer a nova UF
             if(ufSelecionada && !municipiosDisponiveis.includes(inputMunicipio.value)) {
                 inputMunicipio.value = '';
             }
         }
 
-        // Executa quando a UF for alterada
         selectUf.addEventListener('change', atualizarMunicipios);
-        
-        // Executa assim que a página carregar para montar a lista inicial
         window.addEventListener('DOMContentLoaded', atualizarMunicipios);
     </script>
 </body>
@@ -291,6 +295,7 @@ def index():
         return redirect(url_for("login"))
 
     lista_ufs = []
+    lista_redes = []
     mapa_ufs = {}
     tabela_html = ""
     total_linhas = 0
@@ -300,8 +305,8 @@ def index():
         
         if not df_banco.empty:
             lista_ufs = sorted(df_banco['UF'].dropna().unique())
+            lista_redes = sorted(df_banco['REDE'].dropna().unique())
             
-            # Criando o mapa (dicionário) relacionando cada UF aos seus Municípios
             for uf in lista_ufs:
                 municipios_da_uf = df_banco[df_banco['UF'] == uf]['MUNICIPIO'].dropna().unique().tolist()
                 mapa_ufs[uf] = sorted(municipios_da_uf)
@@ -309,6 +314,7 @@ def index():
             # Resgatando filtros
             busca_uf = request.args.get('busca_uf', '').upper()
             busca_municipio = request.args.get('busca_municipio', '')
+            busca_rede = request.args.get('busca_rede', '')
             busca_vigencia = request.args.get('busca_vigencia', '')
             busca_odonto = request.args.get('busca_odonto', '')
 
@@ -318,6 +324,8 @@ def index():
                 df_filtrado = df_filtrado[df_filtrado['UF'] == busca_uf]
             if busca_municipio:
                 df_filtrado = df_filtrado[df_filtrado['MUNICIPIO'].str.contains(busca_municipio, case=False, na=False)]
+            if busca_rede:
+                df_filtrado = df_filtrado[df_filtrado['REDE'] == busca_rede]
             if busca_vigencia:
                 df_filtrado = df_filtrado[df_filtrado['DATA_VIGENCIA'] == busca_vigencia]
             if busca_odonto:
@@ -330,7 +338,6 @@ def index():
     except Exception as e:
         print(f"Erro ao consultar banco: {e}")
 
-    # Converte o dicionário do Python para JSON para o JavaScript conseguir ler no HTML
     mapa_ufs_json = json.dumps(mapa_ufs)
 
     return render_template_string(
@@ -338,6 +345,7 @@ def index():
         role=session.get("role"),
         nome_usuario=session.get("nome"),
         lista_ufs=lista_ufs, 
+        lista_redes=lista_redes,
         mapa_ufs_json=mapa_ufs_json,
         tabela_html=tabela_html, 
         total_linhas=total_linhas
@@ -346,7 +354,6 @@ def index():
 
 @app.route("/upload", methods=["POST"])
 def upload():
-    # Bloqueia quem não estiver logado ou não for admin
     if "usuario" not in session or session.get("role") != "admin":
         return redirect(url_for("index"))
 
@@ -372,9 +379,31 @@ def upload():
 
         falta_coluna = [col for col in colunas_basicas if col not in df.columns]
         if falta_coluna:
-            flash(f"Erro: A planilha enviada não tem as colunas básicas necessárias: {falta_coluna}", "error")
+            flash(f"Erro: A planilha enviada não tem as colunas necessárias: {falta_coluna}", "error")
             return redirect(url_for("index"))
 
+        # ==========================================
+        # TRAVA CONTRA DUPLICIDADE DE IBGE
+        # ==========================================
+        df_existentes = pd.read_sql('SELECT "IBGE", "MUNICIPIO" FROM negociacoes_v2', engine)
+        ibges_no_banco = df_existentes['IBGE'].dropna().unique().tolist()
+        
+        # Encontra se na planilha nova tem algum IBGE que já tá no banco
+        df_duplicados = df[df['IBGE'].isin(ibges_no_banco)]
+        
+        if not df_duplicados.empty:
+            municipios_duplicados = df_duplicados['MUNICIPIO'].unique().tolist()
+            
+            # Limita a lista de nomes pra não explodir a tela se forem muitos
+            if len(municipios_duplicados) > 10:
+                msg_mun = ", ".join(municipios_duplicados[:10]) + f" e mais {len(municipios_duplicados)-10} outros."
+            else:
+                msg_mun = ", ".join(municipios_duplicados)
+                
+            flash(f"⛔ UPLOAD CANCELADO: Os seguintes municípios (IBGE) já existem no banco e não podem ser duplicados: {msg_mun}", "error")
+            return redirect(url_for("index"))
+
+        # Se passou na trava, insere os dados
         df['DATA_VIGENCIA'] = data_vigencia
         df['ODONTO'] = odonto_flag
 
@@ -397,6 +426,7 @@ def exportar():
     try:
         busca_uf = request.form.get('busca_uf', '').upper()
         busca_municipio = request.form.get('busca_municipio', '')
+        busca_rede = request.form.get('busca_rede', '')
         busca_vigencia = request.form.get('busca_vigencia', '')
         busca_odonto = request.form.get('busca_odonto', '')
 
@@ -407,6 +437,8 @@ def exportar():
             df_filtrado = df_filtrado[df_filtrado['UF'] == busca_uf]
         if busca_municipio:
             df_filtrado = df_filtrado[df_filtrado['MUNICIPIO'].str.contains(busca_municipio, case=False, na=False)]
+        if busca_rede:
+            df_filtrado = df_filtrado[df_filtrado['REDE'] == busca_rede]
         if busca_vigencia:
             df_filtrado = df_filtrado[df_filtrado['DATA_VIGENCIA'] == busca_vigencia]
         if busca_odonto:
