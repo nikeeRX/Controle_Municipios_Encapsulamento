@@ -1,7 +1,8 @@
 import os
 import io
+import json
 import pandas as pd
-from flask import Flask, request, render_template_string, send_file, flash, redirect, url_for
+from flask import Flask, request, render_template_string, send_file, flash, redirect, url_for, session
 from sqlalchemy import create_engine, text
 
 app = Flask(__name__)
@@ -10,14 +11,12 @@ app.secret_key = "chave_super_secreta_sistema_redes"
 # ==========================================
 # 1. CONFIGURAÇÃO E CRIAÇÃO DO BANCO
 # ==========================================
-# URL interna do Railway configurada
 DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://postgres:hMNxRensWWNVbiZJuMRBVCawLZfPSQXo@postgres.railway.internal:5432/railway")
 engine = create_engine(DATABASE_URL)
 
 def criar_tabelas():
     try:
         with engine.connect() as conn:
-            # Criando a tabela V2 para se adequar ao novo modelo de importação
             conn.execute(text("""
                 CREATE TABLE IF NOT EXISTS negociacoes_v2 (
                     "UF" VARCHAR(10),
@@ -35,44 +34,80 @@ def criar_tabelas():
 criar_tabelas()
 
 # ==========================================
-# 2. INTERFACE HTML E CSS
+# 2. USUÁRIOS DO SISTEMA
 # ==========================================
+USUARIOS = {
+    "admin": {"senha": "123", "role": "admin", "nome": "Administrador"},
+    "consulta": {"senha": "123", "role": "consulta", "nome": "Equipe de Consulta"}
+}
+
+# ==========================================
+# 3. INTERFACES HTML (LOGIN E SISTEMA)
+# ==========================================
+LOGIN_TEMPLATE = """
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Login - Gestão de Redes</title>
+    <style>
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: #f4f7f6; display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; }
+        .login-box { background: white; padding: 40px; border-radius: 10px; box-shadow: 0 4px 10px rgba(0,0,0,0.1); width: 100%; max-width: 400px; text-align: center; }
+        h2 { color: #2c3e50; margin-bottom: 20px; }
+        input { width: 90%; padding: 12px; margin: 10px 0; border: 1px solid #ccc; border-radius: 5px; font-size: 16px; }
+        .btn { width: 100%; background-color: #3498db; color: white; border: none; padding: 12px; border-radius: 5px; font-size: 16px; font-weight: bold; cursor: pointer; margin-top: 15px; }
+        .btn:hover { background-color: #2980b9; }
+        .alert { color: #e74c3c; margin-bottom: 15px; font-weight: bold; }
+    </style>
+</head>
+<body>
+    <div class="login-box">
+        <h2>🏥 Acesso ao Sistema</h2>
+        {% with messages = get_flashed_messages() %}
+          {% if messages %}
+            <div class="alert">{{ messages[0] }}</div>
+          {% endif %}
+        {% endwith %}
+        <form action="/login" method="POST">
+            <input type="text" name="usuario" placeholder="Nome de usuário" required>
+            <input type="password" name="senha" placeholder="Senha" required>
+            <button type="submit" class="btn">Entrar</button>
+        </form>
+    </div>
+</body>
+</html>
+"""
+
 HTML_TEMPLATE = """
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Gestão de Redes e Regiões de Saúde</title>
+    <title>Gestão de Redes de Saúde</title>
     <style>
-        :root {
-            --primary: #2c3e50;
-            --secondary: #3498db;
-            --light: #f4f7f6;
-            --success: #27ae60;
-            --danger: #e74c3c;
-        }
+        :root { --primary: #2c3e50; --secondary: #3498db; --light: #f4f7f6; --success: #27ae60; --danger: #e74c3c; }
         body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: var(--light); color: #333; margin: 0; padding: 20px; }
         .container { max-width: 1200px; margin: 0 auto; background: #fff; padding: 30px; border-radius: 10px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }
-        h1, h2 { color: var(--primary); border-bottom: 2px solid var(--light); padding-bottom: 10px; }
-        
+        .header { display: flex; justify-content: space-between; align-items: center; border-bottom: 2px solid var(--light); padding-bottom: 10px; margin-bottom: 20px; }
+        h1, h2 { color: var(--primary); margin: 0; }
+        .logout-btn { background-color: var(--danger); color: white; padding: 8px 15px; text-decoration: none; border-radius: 5px; font-weight: bold; font-size: 14px; }
+        .logout-btn:hover { background-color: #c0392b; }
         .form-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px; margin-bottom: 20px; }
         .form-group { display: flex; flex-direction: column; }
         label { font-weight: bold; margin-bottom: 5px; font-size: 14px; color: var(--primary); }
         input, select { padding: 10px; border: 1px solid #ccc; border-radius: 5px; font-size: 14px; }
         input[type="file"] { padding: 7px; }
-        
         .btn { background-color: var(--secondary); color: white; border: none; padding: 12px 20px; border-radius: 5px; cursor: pointer; font-size: 15px; font-weight: bold; transition: 0.3s; text-decoration: none; display: inline-block; }
         .btn:hover { background-color: #2980b9; }
         .btn-export { background-color: var(--success); margin-top: 15px; }
         .btn-export:hover { background-color: #219653; }
-        
         .table-responsive { overflow-x: auto; margin-top: 20px; }
         table { width: 100%; border-collapse: collapse; }
         th, td { border: 1px solid #ddd; padding: 12px; text-align: left; font-size: 14px; }
         th { background-color: var(--primary); color: white; position: sticky; top: 0; }
         tr:nth-child(even) { background-color: #f9f9f9; }
-        
         .alert { padding: 15px; margin-bottom: 20px; border-radius: 5px; color: white; font-weight: bold; }
         .alert.success { background-color: var(--success); }
         .alert.error { background-color: var(--danger); }
@@ -81,7 +116,13 @@ HTML_TEMPLATE = """
 </head>
 <body>
     <div class="container">
-        <h1>🏥 Gestão de Redes de Saúde</h1>
+        <div class="header">
+            <h1>🏥 Gestão de Redes de Saúde</h1>
+            <div>
+                <span style="margin-right: 15px; font-weight: bold; color: var(--primary);">Olá, {{ nome_usuario }}!</span>
+                <a href="/logout" class="logout-btn">Sair</a>
+            </div>
+        </div>
         
         {% with messages = get_flashed_messages(with_categories=true) %}
           {% if messages %}
@@ -91,6 +132,7 @@ HTML_TEMPLATE = """
           {% endif %}
         {% endwith %}
 
+        {% if role == 'admin' %}
         <h2>📥 Upload e Cruzamento de Dados</h2>
         <form action="/upload" method="POST" enctype="multipart/form-data">
             <div class="form-grid">
@@ -112,15 +154,15 @@ HTML_TEMPLATE = """
             </div>
             <button type="submit" class="btn">Processar e Salvar</button>
         </form>
-
         <br><br>
+        {% endif %}
 
         <h2>🔍 Consulta de Municípios</h2>
-        <form action="/" method="GET">
+        <form action="/" method="GET" id="formBusca">
             <div class="form-grid">
                 <div class="form-group">
                     <label>UF:</label>
-                    <select name="busca_uf">
+                    <select name="busca_uf" id="busca_uf">
                         <option value="">Todas</option>
                         {% for uf in lista_ufs %}
                             <option value="{{ uf }}" {% if request.args.get('busca_uf') == uf %}selected{% endif %}>{{ uf }}</option>
@@ -130,12 +172,9 @@ HTML_TEMPLATE = """
                 
                 <div class="form-group">
                     <label>Município:</label>
-                    <input list="municipios_lista" name="busca_municipio" placeholder="Digite para buscar..." value="{{ request.args.get('busca_municipio', '') }}" autocomplete="off">
+                    <input list="municipios_lista" name="busca_municipio" id="busca_municipio" placeholder="Digite para buscar..." value="{{ request.args.get('busca_municipio', '') }}" autocomplete="off">
                     <datalist id="municipios_lista">
-                        {% for mun in lista_municipios %}
-                            <option value="{{ mun }}">
-                        {% endfor %}
-                    </datalist>
+                        </datalist>
                 </div>
 
                 <div class="form-group">
@@ -173,28 +212,99 @@ HTML_TEMPLATE = """
             <div class="alert info" style="margin-top: 20px;">O banco está vazio ou nenhum dado corresponde aos filtros.</div>
         {% endif %}
     </div>
+
+    <script>
+        const mapaUfs = {{ mapa_ufs_json | safe }};
+        const selectUf = document.getElementById('busca_uf');
+        const datalistMunicipios = document.getElementById('municipios_lista');
+        const inputMunicipio = document.getElementById('busca_municipio');
+
+        function atualizarMunicipios() {
+            const ufSelecionada = selectUf.value;
+            datalistMunicipios.innerHTML = ''; 
+            
+            let municipiosDisponiveis = [];
+
+            if (ufSelecionada && mapaUfs[ufSelecionada]) {
+                municipiosDisponiveis = mapaUfs[ufSelecionada];
+            } else {
+                // Se "Todas" estiver selecionado, carrega tudo
+                Object.values(mapaUfs).forEach(lista => {
+                    municipiosDisponiveis = municipiosDisponiveis.concat(lista);
+                });
+            }
+
+            // Remove duplicados e ordena alfabeticamente
+            municipiosDisponiveis = [...new Set(municipiosDisponiveis)].sort();
+
+            // Adiciona as opções no datalist
+            municipiosDisponiveis.forEach(mun => {
+                let option = document.createElement('option');
+                option.value = mun;
+                datalistMunicipios.appendChild(option);
+            });
+            
+            // Limpa o campo de município se a UF mudar e ele não pertencer a nova UF
+            if(ufSelecionada && !municipiosDisponiveis.includes(inputMunicipio.value)) {
+                inputMunicipio.value = '';
+            }
+        }
+
+        // Executa quando a UF for alterada
+        selectUf.addEventListener('change', atualizarMunicipios);
+        
+        // Executa assim que a página carregar para montar a lista inicial
+        window.addEventListener('DOMContentLoaded', atualizarMunicipios);
+    </script>
 </body>
 </html>
 """
 
 # ==========================================
-# 3. ROTAS DO SISTEMA
+# 4. ROTAS DO SISTEMA
 # ==========================================
+
+@app.route("/login", methods=["GET", "POST"])
+def login():
+    if request.method == "POST":
+        usuario = request.form.get("usuario")
+        senha = request.form.get("senha")
+        
+        if usuario in USUARIOS and USUARIOS[usuario]["senha"] == senha:
+            session["usuario"] = usuario
+            session["role"] = USUARIOS[usuario]["role"]
+            session["nome"] = USUARIOS[usuario]["nome"]
+            return redirect(url_for("index"))
+        else:
+            flash("Usuário ou senha incorretos!", "error")
+            
+    return render_template_string(LOGIN_TEMPLATE)
+
+@app.route("/logout")
+def logout():
+    session.clear()
+    return redirect(url_for("login"))
+
 @app.route("/")
 def index():
+    if "usuario" not in session:
+        return redirect(url_for("login"))
+
     lista_ufs = []
-    lista_municipios = []
+    mapa_ufs = {}
     tabela_html = ""
     total_linhas = 0
 
     try:
-        # Lendo da tabela V2
         df_banco = pd.read_sql("SELECT * FROM negociacoes_v2", engine)
         
         if not df_banco.empty:
             lista_ufs = sorted(df_banco['UF'].dropna().unique())
-            # Popular o Datalist com todos os municípios do banco
-            lista_municipios = sorted(df_banco['MUNICIPIO'].dropna().unique())
+            
+            # Criando o mapa (dicionário) relacionando cada UF aos seus Municípios
+            for uf in lista_ufs:
+                municipios_da_uf = df_banco[df_banco['UF'] == uf]['MUNICIPIO'].dropna().unique().tolist()
+                mapa_ufs[uf] = sorted(municipios_da_uf)
 
             # Resgatando filtros
             busca_uf = request.args.get('busca_uf', '').upper()
@@ -207,7 +317,6 @@ def index():
             if busca_uf:
                 df_filtrado = df_filtrado[df_filtrado['UF'] == busca_uf]
             if busca_municipio:
-                # Filtrando exatamente pelo nome clicado/digitado na lista
                 df_filtrado = df_filtrado[df_filtrado['MUNICIPIO'].str.contains(busca_municipio, case=False, na=False)]
             if busca_vigencia:
                 df_filtrado = df_filtrado[df_filtrado['DATA_VIGENCIA'] == busca_vigencia]
@@ -221,10 +330,15 @@ def index():
     except Exception as e:
         print(f"Erro ao consultar banco: {e}")
 
+    # Converte o dicionário do Python para JSON para o JavaScript conseguir ler no HTML
+    mapa_ufs_json = json.dumps(mapa_ufs)
+
     return render_template_string(
         HTML_TEMPLATE, 
+        role=session.get("role"),
+        nome_usuario=session.get("nome"),
         lista_ufs=lista_ufs, 
-        lista_municipios=lista_municipios,
+        mapa_ufs_json=mapa_ufs_json,
         tabela_html=tabela_html, 
         total_linhas=total_linhas
     )
@@ -232,6 +346,10 @@ def index():
 
 @app.route("/upload", methods=["POST"])
 def upload():
+    # Bloqueia quem não estiver logado ou não for admin
+    if "usuario" not in session or session.get("role") != "admin":
+        return redirect(url_for("index"))
+
     arquivo = request.files.get("arquivo")
     data_vigencia = request.form.get("data_vigencia", "").strip()
     odonto_flag = request.form.get("odonto_flag", "").strip()
@@ -246,11 +364,9 @@ def upload():
         else:
             df = pd.read_excel(arquivo, dtype=str)
 
-        # O novo modelo esperado na planilha
         colunas_basicas = ['UF', 'IBGE', 'MUNICIPIO', 'REDE']
         colunas_finais = ['UF', 'IBGE', 'MUNICIPIO', 'REDE', 'DATA_VIGENCIA', 'ODONTO']
 
-        # Remove a coluna antiga se ela ainda vier perdida na planilha
         if 'REGIAO_DE_SAUDE' in df.columns:
             df = df.drop(columns=['REGIAO_DE_SAUDE'])
 
@@ -259,13 +375,11 @@ def upload():
             flash(f"Erro: A planilha enviada não tem as colunas básicas necessárias: {falta_coluna}", "error")
             return redirect(url_for("index"))
 
-        # Preenchendo as novas informações
         df['DATA_VIGENCIA'] = data_vigencia
         df['ODONTO'] = odonto_flag
 
         df_salvar = df[colunas_finais]
         
-        # Salvando na tabela V2
         df_salvar.to_sql('negociacoes_v2', engine, if_exists='append', index=False)
         flash(f"Sucesso! {len(df_salvar)} municípios da rede inseridos com a vigência {data_vigencia}.", "success")
 
@@ -277,6 +391,9 @@ def upload():
 
 @app.route("/exportar", methods=["POST"])
 def exportar():
+    if "usuario" not in session:
+        return redirect(url_for("login"))
+
     try:
         busca_uf = request.form.get('busca_uf', '').upper()
         busca_municipio = request.form.get('busca_municipio', '')
