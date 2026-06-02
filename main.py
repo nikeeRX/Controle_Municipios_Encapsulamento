@@ -9,7 +9,7 @@ st.set_page_config(page_title="Gestão de Redes de Saúde", layout="wide")
 # 1. CONFIGURAÇÃO DO BANCO DE DADOS
 # ==========================================
 # Substitua pela sua URL do Railway
-DATABASE_URL = "postgresql://usuario:senha@host:porta/banco_de_dados" 
+DATABASE_URL = "postgresql://postgres:hMNxRensWWNVbiZJuMRBVCawLZfPSQXo@postgres.railway.internal:5432/railway" 
 
 @st.cache_resource
 def iniciar_conexao():
