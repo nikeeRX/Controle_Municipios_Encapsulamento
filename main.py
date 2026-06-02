@@ -10,23 +10,22 @@ app.secret_key = "chave_super_secreta_sistema_redes"
 # ==========================================
 # 1. CONFIGURAÇÃO E CRIAÇÃO DO BANCO
 # ==========================================
-# Substitua pela sua URL do Railway
+# URL interna do Railway configurada
 DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://postgres:hMNxRensWWNVbiZJuMRBVCawLZfPSQXo@postgres.railway.internal:5432/railway")
 engine = create_engine(DATABASE_URL)
 
 def criar_tabelas():
     try:
         with engine.connect() as conn:
-            # Força a criação da tabela e colunas caso não existam (Resolve o erro do print!)
+            # Criando a tabela V2 para se adequar ao novo modelo de importação
             conn.execute(text("""
-                CREATE TABLE IF NOT EXISTS negociacoes (
+                CREATE TABLE IF NOT EXISTS negociacoes_v2 (
                     "UF" VARCHAR(10),
                     "IBGE" VARCHAR(50),
                     "MUNICIPIO" VARCHAR(255),
-                    "REGIAO_DE_SAUDE" VARCHAR(255),
                     "REDE" VARCHAR(255),
-                    "ANO" VARCHAR(10),
-                    "COMPETENCIA" VARCHAR(50)
+                    "DATA_VIGENCIA" VARCHAR(50),
+                    "ODONTO" VARCHAR(10)
                 )
             """))
             conn.commit()
@@ -57,27 +56,23 @@ HTML_TEMPLATE = """
         .container { max-width: 1200px; margin: 0 auto; background: #fff; padding: 30px; border-radius: 10px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }
         h1, h2 { color: var(--primary); border-bottom: 2px solid var(--light); padding-bottom: 10px; }
         
-        /* Grid de Formulários */
         .form-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px; margin-bottom: 20px; }
         .form-group { display: flex; flex-direction: column; }
         label { font-weight: bold; margin-bottom: 5px; font-size: 14px; color: var(--primary); }
         input, select { padding: 10px; border: 1px solid #ccc; border-radius: 5px; font-size: 14px; }
         input[type="file"] { padding: 7px; }
         
-        /* Botões */
         .btn { background-color: var(--secondary); color: white; border: none; padding: 12px 20px; border-radius: 5px; cursor: pointer; font-size: 15px; font-weight: bold; transition: 0.3s; text-decoration: none; display: inline-block; }
         .btn:hover { background-color: #2980b9; }
         .btn-export { background-color: var(--success); margin-top: 15px; }
         .btn-export:hover { background-color: #219653; }
         
-        /* Tabelas */
         .table-responsive { overflow-x: auto; margin-top: 20px; }
         table { width: 100%; border-collapse: collapse; }
         th, td { border: 1px solid #ddd; padding: 12px; text-align: left; font-size: 14px; }
         th { background-color: var(--primary); color: white; position: sticky; top: 0; }
         tr:nth-child(even) { background-color: #f9f9f9; }
         
-        /* Alertas */
         .alert { padding: 15px; margin-bottom: 20px; border-radius: 5px; color: white; font-weight: bold; }
         .alert.success { background-color: var(--success); }
         .alert.error { background-color: var(--danger); }
@@ -86,7 +81,7 @@ HTML_TEMPLATE = """
 </head>
 <body>
     <div class="container">
-        <h1>🏥 Gestão de Redes e Regiões de Saúde</h1>
+        <h1>🏥 Gestão de Redes de Saúde</h1>
         
         {% with messages = get_flashed_messages(with_categories=true) %}
           {% if messages %}
@@ -104,46 +99,56 @@ HTML_TEMPLATE = """
                     <input type="file" name="arquivo" accept=".xlsx, .csv" required>
                 </div>
                 <div class="form-group">
-                    <label>Escolher Ano (Flag):</label>
-                    <input type="text" name="ano" placeholder="Ex: 2026" required>
+                    <label>Data de Vigência:</label>
+                    <input type="date" name="data_vigencia" required>
                 </div>
                 <div class="form-group">
-                    <label>Competência (Flag):</label>
-                    <input type="text" name="competencia" placeholder="Ex: Maio" required>
-                </div>
-                <div class="form-group">
-                    <label>UF no momento do cruzamento:</label>
-                    <input type="text" name="uf" placeholder="Ex: GO, PR, SC" required>
+                    <label>Odonto:</label>
+                    <select name="odonto_flag" required>
+                        <option value="NÃO">NÃO</option>
+                        <option value="SIM">SIM</option>
+                    </select>
                 </div>
             </div>
-            <button type="submit" class="btn">Cruzar e Salvar no Banco</button>
+            <button type="submit" class="btn">Processar e Salvar</button>
         </form>
 
         <br><br>
 
-        <h2>🔍 Consulta de Municípios Negociados</h2>
+        <h2>🔍 Consulta de Municípios</h2>
         <form action="/" method="GET">
             <div class="form-grid">
                 <div class="form-group">
-                    <label>Filtrar por UF:</label>
+                    <label>UF:</label>
                     <select name="busca_uf">
-                        <option value="">Todas as UFs</option>
+                        <option value="">Todas</option>
                         {% for uf in lista_ufs %}
                             <option value="{{ uf }}" {% if request.args.get('busca_uf') == uf %}selected{% endif %}>{{ uf }}</option>
                         {% endfor %}
                     </select>
                 </div>
+                
                 <div class="form-group">
-                    <label>Filtrar por Município:</label>
-                    <input type="text" name="busca_municipio" placeholder="Digite o nome..." value="{{ request.args.get('busca_municipio', '') }}">
-                </div>
-                <div class="form-group">
-                    <label>Filtrar por Ano:</label>
-                    <select name="busca_ano">
-                        <option value="">Todos os Anos</option>
-                        {% for ano in lista_anos %}
-                            <option value="{{ ano }}" {% if request.args.get('busca_ano') == ano %}selected{% endif %}>{{ ano }}</option>
+                    <label>Município:</label>
+                    <input list="municipios_lista" name="busca_municipio" placeholder="Digite para buscar..." value="{{ request.args.get('busca_municipio', '') }}" autocomplete="off">
+                    <datalist id="municipios_lista">
+                        {% for mun in lista_municipios %}
+                            <option value="{{ mun }}">
                         {% endfor %}
+                    </datalist>
+                </div>
+
+                <div class="form-group">
+                    <label>Data de Vigência:</label>
+                    <input type="date" name="busca_vigencia" value="{{ request.args.get('busca_vigencia', '') }}">
+                </div>
+                
+                <div class="form-group">
+                    <label>Odonto:</label>
+                    <select name="busca_odonto">
+                        <option value="">Ambos</option>
+                        <option value="SIM" {% if request.args.get('busca_odonto') == 'SIM' %}selected{% endif %}>SIM</option>
+                        <option value="NÃO" {% if request.args.get('busca_odonto') == 'NÃO' %}selected{% endif %}>NÃO</option>
                     </select>
                 </div>
             </div>
@@ -155,7 +160,8 @@ HTML_TEMPLATE = """
             <form action="/exportar" method="POST">
                 <input type="hidden" name="busca_uf" value="{{ request.args.get('busca_uf', '') }}">
                 <input type="hidden" name="busca_municipio" value="{{ request.args.get('busca_municipio', '') }}">
-                <input type="hidden" name="busca_ano" value="{{ request.args.get('busca_ano', '') }}">
+                <input type="hidden" name="busca_vigencia" value="{{ request.args.get('busca_vigencia', '') }}">
+                <input type="hidden" name="busca_odonto" value="{{ request.args.get('busca_odonto', '') }}">
                 <button type="submit" class="btn btn-export">📥 Exportar Tabela para Excel</button>
             </form>
             
@@ -177,31 +183,36 @@ HTML_TEMPLATE = """
 @app.route("/")
 def index():
     lista_ufs = []
-    lista_anos = []
+    lista_municipios = []
     tabela_html = ""
     total_linhas = 0
 
     try:
-        # Puxa os dados para popular os selects
-        df_banco = pd.read_sql("SELECT * FROM negociacoes", engine)
+        # Lendo da tabela V2
+        df_banco = pd.read_sql("SELECT * FROM negociacoes_v2", engine)
         
         if not df_banco.empty:
             lista_ufs = sorted(df_banco['UF'].dropna().unique())
-            lista_anos = sorted(df_banco['ANO'].dropna().unique())
+            # Popular o Datalist com todos os municípios do banco
+            lista_municipios = sorted(df_banco['MUNICIPIO'].dropna().unique())
 
-            # Pegando os filtros da URL
+            # Resgatando filtros
             busca_uf = request.args.get('busca_uf', '').upper()
             busca_municipio = request.args.get('busca_municipio', '')
-            busca_ano = request.args.get('busca_ano', '')
+            busca_vigencia = request.args.get('busca_vigencia', '')
+            busca_odonto = request.args.get('busca_odonto', '')
 
             df_filtrado = df_banco.copy()
 
             if busca_uf:
                 df_filtrado = df_filtrado[df_filtrado['UF'] == busca_uf]
             if busca_municipio:
+                # Filtrando exatamente pelo nome clicado/digitado na lista
                 df_filtrado = df_filtrado[df_filtrado['MUNICIPIO'].str.contains(busca_municipio, case=False, na=False)]
-            if busca_ano:
-                df_filtrado = df_filtrado[df_filtrado['ANO'] == busca_ano]
+            if busca_vigencia:
+                df_filtrado = df_filtrado[df_filtrado['DATA_VIGENCIA'] == busca_vigencia]
+            if busca_odonto:
+                df_filtrado = df_filtrado[df_filtrado['ODONTO'] == busca_odonto]
 
             total_linhas = len(df_filtrado)
             if total_linhas > 0:
@@ -213,7 +224,7 @@ def index():
     return render_template_string(
         HTML_TEMPLATE, 
         lista_ufs=lista_ufs, 
-        lista_anos=lista_anos, 
+        lista_municipios=lista_municipios,
         tabela_html=tabela_html, 
         total_linhas=total_linhas
     )
@@ -222,9 +233,8 @@ def index():
 @app.route("/upload", methods=["POST"])
 def upload():
     arquivo = request.files.get("arquivo")
-    ano_flag = request.form.get("ano", "").strip()
-    comp_flag = request.form.get("competencia", "").strip()
-    uf_input = request.form.get("uf", "").strip().upper()
+    data_vigencia = request.form.get("data_vigencia", "").strip()
+    odonto_flag = request.form.get("odonto_flag", "").strip()
 
     if not arquivo or arquivo.filename == '':
         flash("Nenhum arquivo enviado.", "error")
@@ -236,25 +246,28 @@ def upload():
         else:
             df = pd.read_excel(arquivo, dtype=str)
 
-        colunas_basicas = ['IBGE', 'MUNICIPIO', 'REGIAO_DE_SAUDE', 'REDE']
-        colunas_finais = ['UF', 'IBGE', 'MUNICIPIO', 'REGIAO_DE_SAUDE', 'REDE', 'ANO', 'COMPETENCIA']
+        # O novo modelo esperado na planilha
+        colunas_basicas = ['UF', 'IBGE', 'MUNICIPIO', 'REDE']
+        colunas_finais = ['UF', 'IBGE', 'MUNICIPIO', 'REDE', 'DATA_VIGENCIA', 'ODONTO']
 
-        # Validando se a planilha tem o padrão
+        # Remove a coluna antiga se ela ainda vier perdida na planilha
+        if 'REGIAO_DE_SAUDE' in df.columns:
+            df = df.drop(columns=['REGIAO_DE_SAUDE'])
+
         falta_coluna = [col for col in colunas_basicas if col not in df.columns]
         if falta_coluna:
-            flash(f"Erro: Faltam colunas na planilha: {falta_coluna}", "error")
+            flash(f"Erro: A planilha enviada não tem as colunas básicas necessárias: {falta_coluna}", "error")
             return redirect(url_for("index"))
 
-        # Inserindo as flags e a UF no DataFrame
-        df['ANO'] = ano_flag
-        df['COMPETENCIA'] = comp_flag
-        df['UF'] = uf_input
+        # Preenchendo as novas informações
+        df['DATA_VIGENCIA'] = data_vigencia
+        df['ODONTO'] = odonto_flag
 
         df_salvar = df[colunas_finais]
         
-        # Salvando no banco
-        df_salvar.to_sql('negociacoes', engine, if_exists='append', index=False)
-        flash(f"Sucesso! {len(df_salvar)} linhas foram inseridas no banco.", "success")
+        # Salvando na tabela V2
+        df_salvar.to_sql('negociacoes_v2', engine, if_exists='append', index=False)
+        flash(f"Sucesso! {len(df_salvar)} municípios da rede inseridos com a vigência {data_vigencia}.", "success")
 
     except Exception as e:
         flash(f"Erro ao processar o arquivo: {str(e)}", "error")
@@ -265,38 +278,37 @@ def upload():
 @app.route("/exportar", methods=["POST"])
 def exportar():
     try:
-        # Recupera os mesmos filtros que estavam na tela
         busca_uf = request.form.get('busca_uf', '').upper()
         busca_municipio = request.form.get('busca_municipio', '')
-        busca_ano = request.form.get('busca_ano', '')
+        busca_vigencia = request.form.get('busca_vigencia', '')
+        busca_odonto = request.form.get('busca_odonto', '')
 
-        df_banco = pd.read_sql("SELECT * FROM negociacoes", engine)
+        df_banco = pd.read_sql("SELECT * FROM negociacoes_v2", engine)
         df_filtrado = df_banco.copy()
 
         if busca_uf:
             df_filtrado = df_filtrado[df_filtrado['UF'] == busca_uf]
         if busca_municipio:
             df_filtrado = df_filtrado[df_filtrado['MUNICIPIO'].str.contains(busca_municipio, case=False, na=False)]
-        if busca_ano:
-            df_filtrado = df_filtrado[df_filtrado['ANO'] == busca_ano]
+        if busca_vigencia:
+            df_filtrado = df_filtrado[df_filtrado['DATA_VIGENCIA'] == busca_vigencia]
+        if busca_odonto:
+            df_filtrado = df_filtrado[df_filtrado['ODONTO'] == busca_odonto]
 
-        # Gerando o Excel em memória
         buffer = io.BytesIO()
         with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
-            df_filtrado.to_excel(writer, index=False, sheet_name='Negociacoes')
+            df_filtrado.to_excel(writer, index=False, sheet_name='Negociacoes_Vigentes')
         buffer.seek(0)
 
         return send_file(
             buffer,
             as_attachment=True,
-            download_name="resultado_busca.xlsx",
+            download_name="municipios_negociados.xlsx",
             mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
         )
     except Exception as e:
         flash(f"Erro ao gerar Excel: {str(e)}", "error")
         return redirect(url_for("index"))
 
-
 if __name__ == "__main__":
-    # Rodando localmente caso queira testar na sua máquina depois
     app.run(debug=True, port=8000)
