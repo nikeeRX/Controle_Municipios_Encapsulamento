@@ -1,141 +1,125 @@
+import streamlit as st
 import pandas as pd
 from sqlalchemy import create_engine
-import sys
+import io
+
+st.set_page_config(page_title="Gestão de Redes de Saúde", layout="wide")
 
 # ==========================================
-# 1. CONFIGURACAO DO BANCO DE DADOS
+# 1. CONFIGURAÇÃO DO BANCO DE DADOS
 # ==========================================
 # Substitua pela sua URL do Railway
 DATABASE_URL = "postgresql://usuario:senha@host:porta/banco_de_dados" 
 
-try:
-    engine = create_engine(DATABASE_URL)
-except Exception as e:
-    print(f"[ERRO] Falha ao conectar no banco: {e}")
-    sys.exit()
+@st.cache_resource
+def iniciar_conexao():
+    try:
+        return create_engine(DATABASE_URL)
+    except Exception as e:
+        st.error(f"Falha ao conectar no banco: {e}")
+        return None
+
+engine = iniciar_conexao()
+
+st.title("🏢 Sistema de Gestão de Redes de Saúde")
+st.divider()
 
 # ==========================================
 # 2. CRUZAMENTO E UPLOAD DE DADOS
 # ==========================================
-def cruzar_e_inserir():
-    print("\n--- UPLOAD E CRUZAMENTO DE PLANILHA ---")
-    caminho = input("Arraste a planilha ou digite o caminho (.xlsx/.csv): ").strip().replace('"', '').replace("'", "")
+st.header("⚙️ Upload e Cruzamento de Planilha")
+
+uploaded_file = st.file_uploader("Suba a planilha (.xlsx ou .csv)", type=["xlsx", "csv"])
+
+if uploaded_file is not None:
+    # Lendo o arquivo forçando como string
+    if uploaded_file.name.endswith('.csv'):
+        df = pd.read_csv(uploaded_file, dtype=str)
+    else:
+        df = pd.read_excel(uploaded_file, dtype=str)
+
+    st.subheader("🚩 Flags de Cruzamento")
+    col1, col2, col3 = st.columns(3)
     
-    try:
-        if caminho.endswith('.csv'):
-            df = pd.read_csv(caminho, dtype=str)
-        elif caminho.endswith('.xlsx'):
-            df = pd.read_excel(caminho, dtype=str)
-        else:
-            print("[ERRO] Formato invalido! Use .csv ou .xlsx")
-            return
+    with col1:
+        ano_flag = st.text_input("Escolha o Ano (ex: 2026)")
+    with col2:
+        comp_flag = st.text_input("Digite a Competência")
+    with col3:
+        uf_input = st.text_input("UF para preencher (ex: GO, PR, SC)").upper()
 
-        print("\n--- FLAGS DE CRUZAMENTO ---")
-        ano_flag = input("Escolha o Ano (ex: 2026): ").strip()
-        comp_flag = input("Digite a Competencia: ").strip()
-        
-        # Preenchendo a UF da esquerda no momento do cruzamento
-        uf_input = input("Digite a UF para preencher no cruzamento (ex: GO, PR, SC): ").strip().upper()
+    colunas_basicas = ['IBGE', 'MUNICIPIO', 'REGIAO_DE_SAUDE', 'REDE']
+    colunas_finais = ['UF', 'IBGE', 'MUNICIPIO', 'REGIAO_DE_SAUDE', 'REDE', 'ANO', 'COMPETENCIA']
 
-        # Atribuindo as flags e a UF ao DataFrame
-        df['ANO'] = ano_flag
-        df['COMPETENCIA'] = comp_flag
-        df['UF'] = uf_input 
+    if all(col in df.columns for col in colunas_basicas):
+        if st.button("Cruzar e Salvar no Banco"):
+            if not ano_flag or not comp_flag or not uf_input:
+                st.warning("Preencha todas as Flags (Ano, Competência e UF) antes de salvar!")
+            else:
+                df['ANO'] = ano_flag
+                df['COMPETENCIA'] = comp_flag
+                df['UF'] = uf_input 
+                
+                df_salvar = df[colunas_finais]
+                
+                try:
+                    df_salvar.to_sql('negociacoes', engine, if_exists='append', index=False)
+                    st.success(f"✅ Sucesso, mano! {len(df_salvar)} linhas inseridas no banco.")
+                except Exception as e:
+                    st.error(f"Erro ao salvar no banco: {e}")
+    else:
+        st.error(f"Erro: A planilha precisa ter pelo menos estas colunas: {colunas_basicas}")
 
-        # Colunas esperadas para salvar no banco
-        colunas_finais = ['UF', 'IBGE', 'MUNICIPIO', 'REGIAO_DE_SAUDE', 'REDE', 'ANO', 'COMPETENCIA']
-        colunas_basicas = ['IBGE', 'MUNICIPIO', 'REGIAO_DE_SAUDE', 'REDE']
-
-        # Valida se a planilha tem o basico antes de prosseguir
-        if all(col in df.columns for col in colunas_basicas):
-            df_salvar = df[colunas_finais]
-            
-            print("\n[Aguarde] Subindo os dados cruzados para o Railway...")
-            df_salvar.to_sql('negociacoes', engine, if_exists='append', index=False)
-            print(f"[SUCESSO] {len(df_salvar)} linhas inseridas no banco.")
-        else:
-            print(f"[ERRO] A planilha original precisa ter pelo menos estas colunas: {colunas_basicas}")
-
-    except Exception as e:
-        print(f"[ERRO] Falha ao processar o arquivo: {e}")
+st.divider()
 
 # ==========================================
-# 3. BUSCA NO BANCO E EXPORTACAO
+# 3. BUSCA E EXPORTAÇÃO NO BANCO
 # ==========================================
-def buscar_dados():
-    print("\n--- CONSULTA DE MUNICIPIOS ---")
+st.header("🔍 Consulta e Exportação")
+
+if engine:
     try:
         df_banco = pd.read_sql("SELECT * FROM negociacoes", engine)
         
-        if df_banco.empty:
-            print("[AVISO] O banco esta vazio. Faca o upload primeiro.")
-            return
-
-        print("Pressione ENTER para pular um filtro.")
-        filtro_uf = input("Filtrar por UF: ").strip().upper()
-        filtro_municipio = input("Filtrar por Municipio: ").strip()
-        filtro_ano = input("Filtrar por Ano: ").strip()
-
-        df_filtrado = df_banco.copy()
-        
-        if filtro_uf:
-            df_filtrado = df_filtrado[df_filtrado['UF'] == filtro_uf]
-        if filtro_municipio:
-            df_filtrado = df_filtrado[df_filtrado['MUNICIPIO'].str.contains(filtro_municipio, case=False, na=False)]
-        if filtro_ano:
-            df_filtrado = df_filtrado[df_filtrado['ANO'] == filtro_ano]
-
-        print("\n" + "="*60)
-        print(f"RESULTADOS ENCONTRADOS: {len(df_filtrado)}")
-        print("="*60)
-        
-        if not df_filtrado.empty:
-            print(df_filtrado.to_string(index=False))
+        if not df_banco.empty:
+            col_f1, col_f2, col_f3 = st.columns(3)
             
-            print("\n" + "-"*40)
-            exportar = input("Deseja exportar essa tabela filtrada para Excel? (S/N): ").strip().upper()
+            with col_f1:
+                opcoes_uf = ["Todos"] + list(df_banco['UF'].dropna().unique())
+                filtro_uf = st.selectbox("Filtrar por UF", opcoes_uf)
+            with col_f2:
+                filtro_municipio = st.text_input("Filtrar por Município (digite parte do nome)")
+            with col_f3:
+                opcoes_ano = ["Todos"] + list(df_banco['ANO'].dropna().unique())
+                filtro_ano = st.selectbox("Filtrar por Ano", opcoes_ano)
+
+            # Aplicando filtros
+            df_filtrado = df_banco.copy()
             
-            if exportar == 'S':
-                nome_arquivo = input("Digite o nome do arquivo (ou ENTER para 'resultado_busca.xlsx'): ").strip()
-                if not nome_arquivo:
-                    nome_arquivo = "resultado_busca.xlsx"
-                if not nome_arquivo.endswith('.xlsx'):
-                    nome_arquivo += '.xlsx'
+            if filtro_uf != "Todos":
+                df_filtrado = df_filtrado[df_filtrado['UF'] == filtro_uf]
+            if filtro_municipio:
+                df_filtrado = df_filtrado[df_filtrado['MUNICIPIO'].str.contains(filtro_municipio, case=False, na=False)]
+            if filtro_ano != "Todos":
+                df_filtrado = df_filtrado[df_filtrado['ANO'] == filtro_ano]
+
+            st.write(f"**Resultados encontrados: {len(df_filtrado)}**")
+            st.dataframe(df_filtrado, use_container_width=True, hide_index=True)
+            
+            # --- FUNÇÃO DE EXPORTAÇÃO PARA EXCEL ---
+            if not df_filtrado.empty:
+                buffer = io.BytesIO()
+                with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
+                    df_filtrado.to_excel(writer, index=False, sheet_name='Resultados')
                 
-                try:
-                    df_filtrado.to_excel(nome_arquivo, index=False)
-                    print(f"[SUCESSO] Feito! Tabela exportada com sucesso como: {nome_arquivo}")
-                except Exception as e:
-                    print(f"[ERRO] Falha ao gerar o arquivo Excel: {e}")
+                st.download_button(
+                    label="📥 Exportar Tabela para Excel",
+                    data=buffer.getvalue(),
+                    file_name="resultado_busca.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                )
         else:
-            print("Nenhum dado encontrado com esses filtros.")
-
+            st.info("O banco de dados está vazio. Faça o upload primeiro.")
+            
     except Exception as e:
-        print(f"[ERRO] Falha ao buscar no banco: {e}")
-
-# ==========================================
-# 4. MENU PRINCIPAL
-# ==========================================
-def menu():
-    while True:
-        print("\n" + "="*40)
-        print("SISTEMA DE GESTAO DE REDES DE SAUDE")
-        print("="*40)
-        print("[ 1 ] Fazer Upload e Cruzamento")
-        print("[ 2 ] Consultar e Exportar Dados")
-        print("[ 3 ] Sair")
-        
-        opcao = input("Escolha uma opcao: ").strip()
-        
-        if opcao == '1':
-            cruzar_e_inserir()
-        elif opcao == '2':
-            buscar_dados()
-        elif opcao == '3':
-            print("Valeu, mano! Ate a proxima.")
-            break
-        else:
-            print("[ERRO] Opcao invalida.")
-
-if __name__ == "__main__":
-    menu()
+        st.warning(f"Aguardando a criação da tabela no banco ou houve uma falha de conexão: {e}")
