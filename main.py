@@ -63,7 +63,7 @@ LOGIN_TEMPLATE = """
 </head>
 <body>
     <div class="login-box">
-        <h2>🏥 Acesso ao Sistema</h2>
+        <h2>🏥 Acesso ao Sistema JPMS</h2>
         {% with messages = get_flashed_messages() %}
           {% if messages %}
             <div class="alert">{{ messages[0] }}</div>
