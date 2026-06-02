@@ -2,7 +2,7 @@ import os
 import io
 import json
 import pandas as pd
-from flask import Flask, request, render_template_string, send_file, flash, redirect, url_for, session
+from flask import Flask, request, render_template_string, send_file, flash, redirect, url_for, session, make_response
 from sqlalchemy import create_engine, text
 
 app = Flask(__name__)
@@ -42,28 +42,29 @@ USUARIOS = {
 }
 
 # ==========================================
-# 3. INTERFACES HTML (LOGIN E SISTEMA)
+# 3. INTERFACES HTML E CSS RESPONSIVO
 # ==========================================
 LOGIN_TEMPLATE = """
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta name="theme-color" content="#2c3e50">
+    <link rel="manifest" href="/manifest.json">
     <title>Login - Gestão de Redes</title>
     <style>
-        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: #f4f7f6; display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; }
-        .login-box { background: white; padding: 40px; border-radius: 10px; box-shadow: 0 4px 10px rgba(0,0,0,0.1); width: 100%; max-width: 400px; text-align: center; }
-        h2 { color: #2c3e50; margin-bottom: 20px; }
-        input { width: 90%; padding: 12px; margin: 10px 0; border: 1px solid #ccc; border-radius: 5px; font-size: 16px; }
-        .btn { width: 100%; background-color: #3498db; color: white; border: none; padding: 12px; border-radius: 5px; font-size: 16px; font-weight: bold; cursor: pointer; margin-top: 15px; }
-        .btn:hover { background-color: #2980b9; }
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: #f4f7f6; display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; padding: 20px; box-sizing: border-box; }
+        .login-box { background: white; padding: 30px; border-radius: 10px; box-shadow: 0 4px 10px rgba(0,0,0,0.1); width: 100%; max-width: 400px; text-align: center; }
+        h2 { color: #2c3e50; margin-bottom: 20px; font-size: 1.5rem; }
+        input { width: 100%; padding: 12px; margin: 10px 0; border: 1px solid #ccc; border-radius: 5px; font-size: 16px; box-sizing: border-box; }
+        .btn { width: 100%; background-color: #3498db; color: white; border: none; padding: 14px; border-radius: 5px; font-size: 16px; font-weight: bold; cursor: pointer; margin-top: 15px; }
         .alert { color: #e74c3c; margin-bottom: 15px; font-weight: bold; }
     </style>
 </head>
 <body>
     <div class="login-box">
-        <h2>🏥 Acesso ao Sistema JPMS</h2>
+        <h2>🏥 Acesso ao Sistema</h2>
         {% with messages = get_flashed_messages() %}
           {% if messages %}
             <div class="alert">{{ messages[0] }}</div>
@@ -84,42 +85,63 @@ HTML_TEMPLATE = """
 <html lang="pt-BR">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta name="theme-color" content="#2c3e50">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <link rel="manifest" href="/manifest.json">
     <title>Gestão de Redes de Saúde</title>
     <style>
         :root { --primary: #2c3e50; --secondary: #3498db; --light: #f4f7f6; --success: #27ae60; --danger: #e74c3c; }
-        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: var(--light); color: #333; margin: 0; padding: 20px; }
-        .container { max-width: 1200px; margin: 0 auto; background: #fff; padding: 30px; border-radius: 10px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }
-        .header { display: flex; justify-content: space-between; align-items: center; border-bottom: 2px solid var(--light); padding-bottom: 10px; margin-bottom: 20px; }
-        h1, h2 { color: var(--primary); margin: 0; }
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: var(--light); color: #333; margin: 0; padding: 15px; }
+        .container { max-width: 1200px; margin: 0 auto; background: #fff; padding: 25px; border-radius: 10px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }
+        
+        .header { display: flex; justify-content: space-between; align-items: center; border-bottom: 2px solid var(--light); padding-bottom: 15px; margin-bottom: 20px; flex-wrap: wrap; gap: 10px; }
+        h1, h2 { color: var(--primary); margin: 0; font-size: 1.5rem; }
+        .user-info { display: flex; align-items: center; gap: 15px; }
+        
         .logout-btn { background-color: var(--danger); color: white; padding: 8px 15px; text-decoration: none; border-radius: 5px; font-weight: bold; font-size: 14px; }
-        .logout-btn:hover { background-color: #c0392b; }
+        
         .form-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px; margin-bottom: 20px; }
         .form-group { display: flex; flex-direction: column; }
         label { font-weight: bold; margin-bottom: 5px; font-size: 14px; color: var(--primary); }
-        input, select { padding: 10px; border: 1px solid #ccc; border-radius: 5px; font-size: 14px; }
-        input[type="file"] { padding: 7px; }
-        .btn { background-color: var(--secondary); color: white; border: none; padding: 12px 20px; border-radius: 5px; cursor: pointer; font-size: 15px; font-weight: bold; transition: 0.3s; text-decoration: none; display: inline-block; }
-        .btn:hover { background-color: #2980b9; }
+        input, select { padding: 12px; border: 1px solid #ccc; border-radius: 5px; font-size: 15px; }
+        
+        .btn { background-color: var(--secondary); color: white; border: none; padding: 14px 20px; border-radius: 5px; cursor: pointer; font-size: 15px; font-weight: bold; width: 100%; text-align: center; display: inline-block; box-sizing: border-box; }
+        .btn-limpar { background-color: #95a5a6; margin-top: 10px; }
         .btn-export { background-color: var(--success); margin-top: 15px; }
-        .btn-export:hover { background-color: #219653; }
-        .table-responsive { overflow-x: auto; margin-top: 20px; }
-        table { width: 100%; border-collapse: collapse; }
-        th, td { border: 1px solid #ddd; padding: 12px; text-align: left; font-size: 14px; }
+        
+        /* Ajuste nas Tabelas para Celular */
+        .table-responsive { overflow-x: auto; margin-top: 20px; border-radius: 5px; border: 1px solid #ddd; }
+        table { width: 100%; border-collapse: collapse; min-width: 600px; }
+        th, td { border: 1px solid #ddd; padding: 12px; text-align: left; font-size: 13px; }
         th { background-color: var(--primary); color: white; position: sticky; top: 0; }
         tr:nth-child(even) { background-color: #f9f9f9; }
-        .alert { padding: 15px; margin-bottom: 20px; border-radius: 5px; color: white; font-weight: bold; line-height: 1.5; }
+        
+        .alert { padding: 15px; margin-bottom: 20px; border-radius: 5px; color: white; font-weight: bold; line-height: 1.5; font-size: 14px; }
         .alert.success { background-color: var(--success); }
         .alert.error { background-color: var(--danger); }
         .alert.info { background-color: var(--secondary); }
+
+        /* Banners de Instalação (PWA) */
+        #pwa-banner { display: none; position: fixed; bottom: 0; left: 0; width: 100%; background: var(--primary); color: white; padding: 15px; box-sizing: border-box; box-shadow: 0 -2px 10px rgba(0,0,0,0.2); z-index: 1000; justify-content: space-between; align-items: center; }
+        #ios-banner { display: none; position: fixed; bottom: 10px; left: 50%; transform: translateX(-50%); width: 90%; background: white; color: black; padding: 15px; box-sizing: border-box; border-radius: 10px; box-shadow: 0 4px 15px rgba(0,0,0,0.3); z-index: 1000; text-align: center; border: 2px solid var(--secondary); }
+
+        /* Media Queries (CELULAR) */
+        @media (max-width: 768px) {
+            .container { padding: 15px; margin-top: 5px; }
+            .form-grid { grid-template-columns: 1fr; }
+            .header { flex-direction: column; align-items: stretch; }
+            .user-info { justify-content: space-between; }
+        }
     </style>
 </head>
 <body>
     <div class="container">
         <div class="header">
-            <h1>🏥 Gestão de Redes de Saúde</h1>
-            <div>
-                <span style="margin-right: 15px; font-weight: bold; color: var(--primary);">Olá, {{ nome_usuario }}!</span>
+            <h1>🏥 Gestão de Redes</h1>
+            <div class="user-info">
+                <span style="font-weight: bold; color: var(--primary);">Olá, {{ nome_usuario }}!</span>
                 <a href="/logout" class="logout-btn">Sair</a>
             </div>
         </div>
@@ -133,11 +155,11 @@ HTML_TEMPLATE = """
         {% endwith %}
 
         {% if role == 'admin' %}
-        <h2>📥 Upload e Cruzamento de Dados</h2>
+        <h2>📥 Nova Importação</h2>
         <form action="/upload" method="POST" enctype="multipart/form-data">
             <div class="form-grid">
                 <div class="form-group">
-                    <label>Arquivo Planilha (.xlsx ou .csv):</label>
+                    <label>Arquivo (.xlsx ou .csv):</label>
                     <input type="file" name="arquivo" accept=".xlsx, .csv" required>
                 </div>
                 <div class="form-group">
@@ -154,10 +176,10 @@ HTML_TEMPLATE = """
             </div>
             <button type="submit" class="btn">Processar e Salvar</button>
         </form>
-        <br><br>
+        <hr style="margin: 30px 0; border: 1px solid #eee;">
         {% endif %}
 
-        <h2>🔍 Consulta de Municípios</h2>
+        <h2>🔍 Consulta</h2>
         <form action="/" method="GET" id="formBusca">
             <div class="form-grid">
                 <div class="form-group">
@@ -172,9 +194,8 @@ HTML_TEMPLATE = """
                 
                 <div class="form-group">
                     <label>Município:</label>
-                    <input list="municipios_lista" name="busca_municipio" id="busca_municipio" placeholder="Digite para buscar..." value="{{ request.args.get('busca_municipio', '') }}" autocomplete="off">
-                    <datalist id="municipios_lista">
-                        </datalist>
+                    <input list="municipios_lista" name="busca_municipio" id="busca_municipio" placeholder="Digite..." value="{{ request.args.get('busca_municipio', '') }}" autocomplete="off">
+                    <datalist id="municipios_lista"></datalist>
                 </div>
 
                 <div class="form-group">
@@ -188,7 +209,7 @@ HTML_TEMPLATE = """
                 </div>
 
                 <div class="form-group">
-                    <label>Data de Vigência:</label>
+                    <label>Data Vigência:</label>
                     <input type="date" name="busca_vigencia" value="{{ request.args.get('busca_vigencia', '') }}">
                 </div>
                 
@@ -202,7 +223,7 @@ HTML_TEMPLATE = """
                 </div>
             </div>
             <button type="submit" class="btn">Aplicar Filtros</button>
-            <a href="/" class="btn" style="background-color: #95a5a6;">Limpar</a>
+            <a href="/" class="btn btn-limpar">Limpar Filtros</a>
         </form>
 
         {% if tabela_html %}
@@ -212,19 +233,34 @@ HTML_TEMPLATE = """
                 <input type="hidden" name="busca_rede" value="{{ request.args.get('busca_rede', '') }}">
                 <input type="hidden" name="busca_vigencia" value="{{ request.args.get('busca_vigencia', '') }}">
                 <input type="hidden" name="busca_odonto" value="{{ request.args.get('busca_odonto', '') }}">
-                <button type="submit" class="btn btn-export">📥 Exportar Tabela para Excel</button>
+                <button type="submit" class="btn btn-export">📥 Exportar Excel</button>
             </form>
             
-            <p><strong>Resultados encontrados: {{ total_linhas }}</strong></p>
+            <p style="margin-top: 15px;"><strong>Resultados encontrados: {{ total_linhas }}</strong></p>
             <div class="table-responsive">
                 {{ tabela_html | safe }}
             </div>
         {% else %}
-            <div class="alert info" style="margin-top: 20px;">O banco está vazio ou nenhum dado corresponde aos filtros.</div>
+            <div class="alert info" style="margin-top: 20px;">O banco está vazio ou nenhum dado corresponde.</div>
         {% endif %}
     </div>
 
+    <div id="pwa-banner">
+        <span>📲 Instale o App para acesso rápido!</span>
+        <div>
+            <button id="pwa-install-btn" style="background:var(--success); color:white; border:none; padding:8px 15px; border-radius:5px; font-weight:bold;">Instalar</button>
+            <button onclick="document.getElementById('pwa-banner').style.display='none'" style="background:none; border:none; color:white; font-weight:bold; font-size:18px; margin-left:10px;">×</button>
+        </div>
+    </div>
+
+    <div id="ios-banner">
+        <p style="margin: 0 0 10px 0; font-weight: bold; color: var(--primary);">📲 Instalar App no iPhone</p>
+        <p style="font-size: 13px; margin:0;">Toque em <b>Compartilhar</b> (quadrado com a seta pra cima) na barra do Safari e depois em <b>"Adicionar à Tela de Início"</b>.</p>
+        <button onclick="document.getElementById('ios-banner').style.display='none'" style="margin-top:10px; width:100%; padding:8px; background:#ddd; border:none; border-radius:5px; font-weight:bold;">Entendi</button>
+    </div>
+
     <script>
+        // 1. Lógica dos Filtros em Cascata (UF -> Municípios)
         const mapaUfs = {{ mapa_ufs_json | safe }};
         const selectUf = document.getElementById('busca_uf');
         const datalistMunicipios = document.getElementById('municipios_lista');
@@ -233,7 +269,6 @@ HTML_TEMPLATE = """
         function atualizarMunicipios() {
             const ufSelecionada = selectUf.value;
             datalistMunicipios.innerHTML = ''; 
-            
             let municipiosDisponiveis = [];
 
             if (ufSelecionada && mapaUfs[ufSelecionada]) {
@@ -245,7 +280,6 @@ HTML_TEMPLATE = """
             }
 
             municipiosDisponiveis = [...new Set(municipiosDisponiveis)].sort();
-
             municipiosDisponiveis.forEach(mun => {
                 let option = document.createElement('option');
                 option.value = mun;
@@ -256,16 +290,95 @@ HTML_TEMPLATE = """
                 inputMunicipio.value = '';
             }
         }
-
         selectUf.addEventListener('change', atualizarMunicipios);
         window.addEventListener('DOMContentLoaded', atualizarMunicipios);
+
+        // 2. Lógica PWA (Service Worker e Instalação)
+        if ('serviceWorker' in navigator) {
+            window.addEventListener('load', () => {
+                navigator.serviceWorker.register('/sw.js').catch(err => console.log('SW falhou: ', err));
+            });
+        }
+
+        // Instalação Android
+        let deferredPrompt;
+        window.addEventListener('beforeinstallprompt', (e) => {
+            e.preventDefault();
+            deferredPrompt = e;
+            document.getElementById('pwa-banner').style.display = 'flex';
+        });
+
+        document.getElementById('pwa-install-btn').addEventListener('click', async () => {
+            document.getElementById('pwa-banner').style.display = 'none';
+            if (deferredPrompt) {
+                deferredPrompt.prompt();
+                const { outcome } = await deferredPrompt.userChoice;
+                deferredPrompt = null;
+            }
+        });
+
+        // Detecção iOS para dar a instrução correta
+        const isIos = () => {
+            const userAgent = window.navigator.userAgent.toLowerCase();
+            return /iphone|ipad|ipod/.test(userAgent);
+        };
+        const isInStandaloneMode = () => ('standalone' in window.navigator) && (window.navigator.standalone);
+
+        if (isIos() && !isInStandaloneMode()) {
+            // Se for iphone e ainda não estiver instalado, mostra o aviso após 2 segundos
+            setTimeout(() => {
+                document.getElementById('ios-banner').style.display = 'block';
+            }, 2000);
+        }
     </script>
 </body>
 </html>
 """
 
 # ==========================================
-# 4. ROTAS DO SISTEMA
+# 4. ROTAS DO PWA (APP CELULAR)
+# ==========================================
+
+@app.route('/manifest.json')
+def manifest():
+    # Isso transforma o site em App no celular
+    manifest_data = {
+        "name": "Gestão de Redes Saúde",
+        "short_name": "Redes",
+        "start_url": "/",
+        "display": "standalone",
+        "background_color": "#f4f7f6",
+        "theme_color": "#2c3e50",
+        "icons": [
+            {
+                "src": "https://cdn-icons-png.flaticon.com/512/3063/3063206.png",
+                "sizes": "512x512",
+                "type": "image/png"
+            }
+        ]
+    }
+    response = make_response(json.dumps(manifest_data))
+    response.headers["Content-Type"] = "application/json"
+    return response
+
+@app.route('/sw.js')
+def service_worker():
+    # Script vital para o celular reconhecer que pode ser instalado
+    js = """
+    self.addEventListener('install', (e) => {
+        self.skipWaiting();
+    });
+    self.addEventListener('fetch', (e) => {
+        e.respondWith(fetch(e.request).catch(() => new Response("Você está offline!")));
+    });
+    """
+    response = make_response(js)
+    response.headers["Content-Type"] = "application/javascript"
+    return response
+
+
+# ==========================================
+# 5. ROTAS DO SISTEMA DE DADOS
 # ==========================================
 
 @app.route("/login", methods=["GET", "POST"])
@@ -311,7 +424,6 @@ def index():
                 municipios_da_uf = df_banco[df_banco['UF'] == uf]['MUNICIPIO'].dropna().unique().tolist()
                 mapa_ufs[uf] = sorted(municipios_da_uf)
 
-            # Resgatando filtros
             busca_uf = request.args.get('busca_uf', '').upper()
             busca_municipio = request.args.get('busca_municipio', '')
             busca_rede = request.args.get('busca_rede', '')
@@ -382,33 +494,26 @@ def upload():
             flash(f"Erro: A planilha enviada não tem as colunas necessárias: {falta_coluna}", "error")
             return redirect(url_for("index"))
 
-        # ==========================================
         # TRAVA CONTRA DUPLICIDADE DE IBGE
-        # ==========================================
         df_existentes = pd.read_sql('SELECT "IBGE", "MUNICIPIO" FROM negociacoes_v2', engine)
         ibges_no_banco = df_existentes['IBGE'].dropna().unique().tolist()
         
-        # Encontra se na planilha nova tem algum IBGE que já tá no banco
         df_duplicados = df[df['IBGE'].isin(ibges_no_banco)]
         
         if not df_duplicados.empty:
             municipios_duplicados = df_duplicados['MUNICIPIO'].unique().tolist()
-            
-            # Limita a lista de nomes pra não explodir a tela se forem muitos
             if len(municipios_duplicados) > 10:
                 msg_mun = ", ".join(municipios_duplicados[:10]) + f" e mais {len(municipios_duplicados)-10} outros."
             else:
                 msg_mun = ", ".join(municipios_duplicados)
                 
-            flash(f"⛔ UPLOAD CANCELADO: Os seguintes municípios (IBGE) já existem no banco e não podem ser duplicados: {msg_mun}", "error")
+            flash(f"⛔ UPLOAD CANCELADO: Os seguintes municípios já existem no banco e não podem ser duplicados: {msg_mun}", "error")
             return redirect(url_for("index"))
 
-        # Se passou na trava, insere os dados
         df['DATA_VIGENCIA'] = data_vigencia
         df['ODONTO'] = odonto_flag
 
         df_salvar = df[colunas_finais]
-        
         df_salvar.to_sql('negociacoes_v2', engine, if_exists='append', index=False)
         flash(f"Sucesso! {len(df_salvar)} municípios da rede inseridos com a vigência {data_vigencia}.", "success")
 
