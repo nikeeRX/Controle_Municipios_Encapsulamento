@@ -42,7 +42,7 @@ USUARIOS = {
 }
 
 # ==========================================
-# 3. INTERFACES HTML E CSS RESPONSIVO
+# 3. INTERFACES HTML E CSS RESPONSIVO (PWA)
 # ==========================================
 LOGIN_TEMPLATE = """
 <!DOCTYPE html>
@@ -111,7 +111,6 @@ HTML_TEMPLATE = """
         .btn-limpar { background-color: #95a5a6; margin-top: 10px; }
         .btn-export { background-color: var(--success); margin-top: 15px; }
         
-        /* Ajuste nas Tabelas para Celular */
         .table-responsive { overflow-x: auto; margin-top: 20px; border-radius: 5px; border: 1px solid #ddd; }
         table { width: 100%; border-collapse: collapse; min-width: 600px; }
         th, td { border: 1px solid #ddd; padding: 12px; text-align: left; font-size: 13px; }
@@ -123,11 +122,9 @@ HTML_TEMPLATE = """
         .alert.error { background-color: var(--danger); }
         .alert.info { background-color: var(--secondary); }
 
-        /* Banners de Instalação (PWA) */
         #pwa-banner { display: none; position: fixed; bottom: 0; left: 0; width: 100%; background: var(--primary); color: white; padding: 15px; box-sizing: border-box; box-shadow: 0 -2px 10px rgba(0,0,0,0.2); z-index: 1000; justify-content: space-between; align-items: center; }
         #ios-banner { display: none; position: fixed; bottom: 10px; left: 50%; transform: translateX(-50%); width: 90%; background: white; color: black; padding: 15px; box-sizing: border-box; border-radius: 10px; box-shadow: 0 4px 15px rgba(0,0,0,0.3); z-index: 1000; text-align: center; border: 2px solid var(--secondary); }
 
-        /* Media Queries (CELULAR) */
         @media (max-width: 768px) {
             .container { padding: 15px; margin-top: 5px; }
             .form-grid { grid-template-columns: 1fr; }
@@ -155,7 +152,7 @@ HTML_TEMPLATE = """
         {% endwith %}
 
         {% if role == 'admin' %}
-        <h2>📥 Nova Importação</h2>
+        <h2>📥 Nova Importação ou Atualização</h2>
         <form action="/upload" method="POST" enctype="multipart/form-data">
             <div class="form-grid">
                 <div class="form-group">
@@ -260,7 +257,6 @@ HTML_TEMPLATE = """
     </div>
 
     <script>
-        // 1. Lógica dos Filtros em Cascata (UF -> Municípios)
         const mapaUfs = {{ mapa_ufs_json | safe }};
         const selectUf = document.getElementById('busca_uf');
         const datalistMunicipios = document.getElementById('municipios_lista');
@@ -293,14 +289,12 @@ HTML_TEMPLATE = """
         selectUf.addEventListener('change', atualizarMunicipios);
         window.addEventListener('DOMContentLoaded', atualizarMunicipios);
 
-        // 2. Lógica PWA (Service Worker e Instalação)
         if ('serviceWorker' in navigator) {
             window.addEventListener('load', () => {
                 navigator.serviceWorker.register('/sw.js').catch(err => console.log('SW falhou: ', err));
             });
         }
 
-        // Instalação Android
         let deferredPrompt;
         window.addEventListener('beforeinstallprompt', (e) => {
             e.preventDefault();
@@ -317,7 +311,6 @@ HTML_TEMPLATE = """
             }
         });
 
-        // Detecção iOS para dar a instrução correta
         const isIos = () => {
             const userAgent = window.navigator.userAgent.toLowerCase();
             return /iphone|ipad|ipod/.test(userAgent);
@@ -325,7 +318,6 @@ HTML_TEMPLATE = """
         const isInStandaloneMode = () => ('standalone' in window.navigator) && (window.navigator.standalone);
 
         if (isIos() && !isInStandaloneMode()) {
-            // Se for iphone e ainda não estiver instalado, mostra o aviso após 2 segundos
             setTimeout(() => {
                 document.getElementById('ios-banner').style.display = 'block';
             }, 2000);
@@ -338,10 +330,8 @@ HTML_TEMPLATE = """
 # ==========================================
 # 4. ROTAS DO PWA (APP CELULAR)
 # ==========================================
-
 @app.route('/manifest.json')
 def manifest():
-    # Isso transforma o site em App no celular
     manifest_data = {
         "name": "Gestão de Redes Saúde",
         "short_name": "Redes",
@@ -363,7 +353,6 @@ def manifest():
 
 @app.route('/sw.js')
 def service_worker():
-    # Script vital para o celular reconhecer que pode ser instalado
     js = """
     self.addEventListener('install', (e) => {
         self.skipWaiting();
@@ -376,11 +365,9 @@ def service_worker():
     response.headers["Content-Type"] = "application/javascript"
     return response
 
-
 # ==========================================
 # 5. ROTAS DO SISTEMA DE DADOS
 # ==========================================
-
 @app.route("/login", methods=["GET", "POST"])
 def login():
     if request.method == "POST":
@@ -494,28 +481,44 @@ def upload():
             flash(f"Erro: A planilha enviada não tem as colunas necessárias: {falta_coluna}", "error")
             return redirect(url_for("index"))
 
-        # TRAVA CONTRA DUPLICIDADE DE IBGE
-        df_existentes = pd.read_sql('SELECT "IBGE", "MUNICIPIO" FROM negociacoes_v2', engine)
-        ibges_no_banco = df_existentes['IBGE'].dropna().unique().tolist()
+        # Preparando os dados
+        df_salvar = df[colunas_basicas].copy()
+        df_salvar['DATA_VIGENCIA'] = data_vigencia
+        df_salvar['ODONTO'] = odonto_flag
         
-        df_duplicados = df[df['IBGE'].isin(ibges_no_banco)]
-        
-        if not df_duplicados.empty:
-            municipios_duplicados = df_duplicados['MUNICIPIO'].unique().tolist()
-            if len(municipios_duplicados) > 10:
-                msg_mun = ", ".join(municipios_duplicados[:10]) + f" e mais {len(municipios_duplicados)-10} outros."
-            else:
-                msg_mun = ", ".join(municipios_duplicados)
-                
-            flash(f"⛔ UPLOAD CANCELADO: Os seguintes municípios já existem no banco e não podem ser duplicados: {msg_mun}", "error")
-            return redirect(url_for("index"))
+        # Criando a chave única IBGE + REDE para comparar o que já existe
+        df_salvar['CHAVE'] = df_salvar['IBGE'].astype(str) + "_" + df_salvar['REDE'].astype(str)
 
-        df['DATA_VIGENCIA'] = data_vigencia
-        df['ODONTO'] = odonto_flag
+        # Lendo o que já tem no banco
+        df_existentes = pd.read_sql('SELECT "IBGE", "REDE" FROM negociacoes_v2', engine)
+        df_existentes['CHAVE'] = df_existentes['IBGE'].astype(str) + "_" + df_existentes['REDE'].astype(str)
+        chaves_banco = set(df_existentes['CHAVE'].tolist())
 
-        df_salvar = df[colunas_finais]
-        df_salvar.to_sql('negociacoes_v2', engine, if_exists='append', index=False)
-        flash(f"Sucesso! {len(df_salvar)} municípios da rede inseridos com a vigência {data_vigencia}.", "success")
+        # Separando o que é INSERT (novo) do que é UPDATE (atualização silenciosa)
+        df_novos = df_salvar[~df_salvar['CHAVE'].isin(chaves_banco)].copy()
+        df_atualizar = df_salvar[df_salvar['CHAVE'].isin(chaves_banco)].copy()
+
+        linhas_atualizadas = 0
+        linhas_inseridas = 0
+
+        # 1. Fazendo o UPDATE dos existentes silenciosamente (Sem Crítica)
+        if not df_atualizar.empty:
+            with engine.connect() as conn:
+                for _, row in df_atualizar.iterrows():
+                    conn.execute(
+                        text('UPDATE negociacoes_v2 SET "ODONTO" = :odonto, "DATA_VIGENCIA" = :vigencia WHERE "IBGE" = :ibge AND "REDE" = :rede'),
+                        {"odonto": row['ODONTO'], "vigencia": row['DATA_VIGENCIA'], "ibge": row['IBGE'], "rede": row['REDE']}
+                    )
+                conn.commit()
+                linhas_atualizadas = len(df_atualizar)
+
+        # 2. Fazendo o INSERT dos novos
+        if not df_novos.empty:
+            df_novos = df_novos.drop(columns=['CHAVE'])
+            df_novos.to_sql('negociacoes_v2', engine, if_exists='append', index=False)
+            linhas_inseridas = len(df_novos)
+
+        flash(f"Sucesso! {linhas_inseridas} novos registros inseridos e {linhas_atualizadas} municípios existentes atualizados sem problemas.", "success")
 
     except Exception as e:
         flash(f"Erro ao processar o arquivo: {str(e)}", "error")
