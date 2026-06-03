@@ -92,7 +92,7 @@ HTML_TEMPLATE = """
     <link rel="manifest" href="/manifest.json">
     <title>Gestão de Redes de Saúde</title>
     <style>
-        :root { --primary: #2c3e50; --secondary: #3498db; --light: #f4f7f6; --success: #27ae60; --danger: #e74c3c; }
+        :root { --primary: #2c3e50; --secondary: #3498db; --light: #f4f7f6; --success: #27ae60; --danger: #e74c3c; --warning: #f1c40f; }
         body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: var(--light); color: #333; margin: 0; padding: 15px; }
         .container { max-width: 1200px; margin: 0 auto; background: #fff; padding: 25px; border-radius: 10px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }
         
@@ -111,17 +111,34 @@ HTML_TEMPLATE = """
         .btn-limpar { background-color: #95a5a6; margin-top: 10px; }
         .btn-export { background-color: var(--success); margin-top: 15px; }
         
-        .table-responsive { overflow-x: auto; margin-top: 20px; border-radius: 5px; border: 1px solid #ddd; }
+        /* Ajuste nas Tabelas */
+        .table-responsive { overflow-x: auto; margin-top: 20px; border-radius: 5px; border: 1px solid #ddd; max-height: 600px; }
         table { width: 100%; border-collapse: collapse; min-width: 600px; }
         th, td { border: 1px solid #ddd; padding: 12px; text-align: left; font-size: 13px; }
-        th { background-color: var(--primary); color: white; position: sticky; top: 0; }
+        th { background-color: var(--primary); color: white; position: sticky; top: 0; z-index: 10; }
         tr:nth-child(even) { background-color: #f9f9f9; }
+        tr:hover { background-color: #f1f1f1; }
         
+        /* Botões de Ação na Tabela */
+        .btn-action { padding: 6px 10px; border: none; border-radius: 4px; cursor: pointer; font-size: 14px; margin-right: 5px; transition: 0.2s; }
+        .btn-edit { background-color: var(--warning); color: #000; }
+        .btn-edit:hover { background-color: #d4ac0d; }
+        .btn-delete { background-color: var(--danger); color: #fff; }
+        .btn-delete:hover { background-color: #c0392b; }
+
         .alert { padding: 15px; margin-bottom: 20px; border-radius: 5px; color: white; font-weight: bold; line-height: 1.5; font-size: 14px; }
         .alert.success { background-color: var(--success); }
         .alert.error { background-color: var(--danger); }
         .alert.info { background-color: var(--secondary); }
 
+        /* Modal (Pop-up de Edição) */
+        .modal { display: none; position: fixed; z-index: 2000; left: 0; top: 0; width: 100%; height: 100%; background-color: rgba(0,0,0,0.6); backdrop-filter: blur(3px); }
+        .modal-content { background-color: #fff; margin: 5% auto; padding: 25px; border-radius: 10px; width: 90%; max-width: 450px; box-shadow: 0 5px 15px rgba(0,0,0,0.3); }
+        .close { color: #aaa; float: right; font-size: 28px; font-weight: bold; cursor: pointer; }
+        .close:hover { color: #000; }
+        .modal-content h3 { margin-top: 0; color: var(--primary); border-bottom: 2px solid var(--light); padding-bottom: 10px; }
+
+        /* Banners PWA */
         #pwa-banner { display: none; position: fixed; bottom: 0; left: 0; width: 100%; background: var(--primary); color: white; padding: 15px; box-sizing: border-box; box-shadow: 0 -2px 10px rgba(0,0,0,0.2); z-index: 1000; justify-content: space-between; align-items: center; }
         #ios-banner { display: none; position: fixed; bottom: 10px; left: 50%; transform: translateX(-50%); width: 90%; background: white; color: black; padding: 15px; box-sizing: border-box; border-radius: 10px; box-shadow: 0 4px 15px rgba(0,0,0,0.3); z-index: 1000; text-align: center; border: 2px solid var(--secondary); }
 
@@ -176,7 +193,7 @@ HTML_TEMPLATE = """
         <hr style="margin: 30px 0; border: 1px solid #eee;">
         {% endif %}
 
-        <h2>🔍 Consulta</h2>
+        <h2>🔍 Consulta e Gerenciamento</h2>
         <form action="/" method="GET" id="formBusca">
             <div class="form-grid">
                 <div class="form-group">
@@ -223,7 +240,7 @@ HTML_TEMPLATE = """
             <a href="/" class="btn btn-limpar">Limpar Filtros</a>
         </form>
 
-        {% if tabela_html %}
+        {% if registros %}
             <form action="/exportar" method="POST">
                 <input type="hidden" name="busca_uf" value="{{ request.args.get('busca_uf', '') }}">
                 <input type="hidden" name="busca_municipio" value="{{ request.args.get('busca_municipio', '') }}">
@@ -235,11 +252,84 @@ HTML_TEMPLATE = """
             
             <p style="margin-top: 15px;"><strong>Resultados encontrados: {{ total_linhas }}</strong></p>
             <div class="table-responsive">
-                {{ tabela_html | safe }}
+                <table>
+                    <thead>
+                        <tr>
+                            <th>UF</th>
+                            <th>IBGE</th>
+                            <th>MUNICÍPIO</th>
+                            <th>REDE</th>
+                            <th>DATA VIGÊNCIA</th>
+                            <th>ODONTO</th>
+                            {% if role == 'admin' %}
+                            <th>AÇÕES</th>
+                            {% endif %}
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for row in registros %}
+                        <tr>
+                            <td>{{ row.UF }}</td>
+                            <td>{{ row.IBGE }}</td>
+                            <td>{{ row.MUNICIPIO }}</td>
+                            <td>{{ row.REDE }}</td>
+                            <td>{{ row.DATA_VIGENCIA }}</td>
+                            <td>{{ row.ODONTO }}</td>
+                            {% if role == 'admin' %}
+                            <td>
+                                <button type="button" class="btn-action btn-edit" title="Editar"
+                                    data-ibge="{{ row.IBGE }}" 
+                                    data-mun="{{ row.MUNICIPIO }}" 
+                                    data-rede="{{ row.REDE }}" 
+                                    data-vig="{{ row.DATA_VIGENCIA }}" 
+                                    data-odonto="{{ row.ODONTO }}" 
+                                    onclick="abrirModalEdicao(this)">✏️</button>
+                                
+                                <form action="/excluir" method="POST" style="display:inline;" onsubmit="return confirm('Tem certeza que deseja EXCLUIR {{ row.MUNICIPIO }} da rede {{ row.REDE }}?');">
+                                    <input type="hidden" name="ibge" value="{{ row.IBGE }}">
+                                    <input type="hidden" name="rede" value="{{ row.REDE }}">
+                                    <button type="submit" class="btn-action btn-delete" title="Excluir">🗑️</button>
+                                </form>
+                            </td>
+                            {% endif %}
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
             </div>
         {% else %}
-            <div class="alert info" style="margin-top: 20px;">O banco está vazio ou nenhum dado corresponde.</div>
+            <div class="alert info" style="margin-top: 20px;">O banco está vazio ou nenhum dado corresponde aos filtros.</div>
         {% endif %}
+    </div>
+
+    <div id="modalEdicao" class="modal">
+        <div class="modal-content">
+            <span class="close" onclick="fecharModal()">&times;</span>
+            <h3>✏️ Editar Registro</h3>
+            <p style="margin-top: 0; color: #555;">Município: <strong id="lbl_municipio"></strong></p>
+            
+            <form action="/editar" method="POST">
+                <input type="hidden" name="ibge" id="edit_ibge">
+                <input type="hidden" name="rede_antiga" id="edit_rede_antiga">
+                
+                <div class="form-group">
+                    <label>Rede:</label>
+                    <input type="text" name="nova_rede" id="edit_rede" required>
+                </div>
+                <div class="form-group" style="margin-top: 10px;">
+                    <label>Data Vigência:</label>
+                    <input type="date" name="nova_vigencia" id="edit_vigencia" required>
+                </div>
+                <div class="form-group" style="margin-top: 10px;">
+                    <label>Odonto:</label>
+                    <select name="novo_odonto" id="edit_odonto" required>
+                        <option value="SIM">SIM</option>
+                        <option value="NÃO">NÃO</option>
+                    </select>
+                </div>
+                <button type="submit" class="btn" style="margin-top: 20px;">💾 Salvar Alterações</button>
+            </form>
+        </div>
     </div>
 
     <div id="pwa-banner">
@@ -249,14 +339,38 @@ HTML_TEMPLATE = """
             <button onclick="document.getElementById('pwa-banner').style.display='none'" style="background:none; border:none; color:white; font-weight:bold; font-size:18px; margin-left:10px;">×</button>
         </div>
     </div>
-
     <div id="ios-banner">
         <p style="margin: 0 0 10px 0; font-weight: bold; color: var(--primary);">📲 Instalar App no iPhone</p>
-        <p style="font-size: 13px; margin:0;">Toque em <b>Compartilhar</b> (quadrado com a seta pra cima) na barra do Safari e depois em <b>"Adicionar à Tela de Início"</b>.</p>
+        <p style="font-size: 13px; margin:0;">Toque em <b>Compartilhar</b> e depois em <b>"Adicionar à Tela de Início"</b>.</p>
         <button onclick="document.getElementById('ios-banner').style.display='none'" style="margin-top:10px; width:100%; padding:8px; background:#ddd; border:none; border-radius:5px; font-weight:bold;">Entendi</button>
     </div>
 
     <script>
+        // Lógica do Modal de Edição
+        function abrirModalEdicao(btn) {
+            document.getElementById('edit_ibge').value = btn.getAttribute('data-ibge');
+            document.getElementById('lbl_municipio').innerText = btn.getAttribute('data-mun') + " (" + btn.getAttribute('data-ibge') + ")";
+            document.getElementById('edit_rede_antiga').value = btn.getAttribute('data-rede');
+            
+            document.getElementById('edit_rede').value = btn.getAttribute('data-rede');
+            document.getElementById('edit_vigencia').value = btn.getAttribute('data-vig');
+            document.getElementById('edit_odonto').value = btn.getAttribute('data-odonto');
+            
+            document.getElementById('modalEdicao').style.display = 'block';
+        }
+
+        function fecharModal() {
+            document.getElementById('modalEdicao').style.display = 'none';
+        }
+
+        // Fechar clicando fora do modal
+        window.onclick = function(event) {
+            if (event.target == document.getElementById('modalEdicao')) {
+                fecharModal();
+            }
+        }
+
+        // Filtros em Cascata (UF -> Municípios)
         const mapaUfs = {{ mapa_ufs_json | safe }};
         const selectUf = document.getElementById('busca_uf');
         const datalistMunicipios = document.getElementById('municipios_lista');
@@ -289,38 +403,29 @@ HTML_TEMPLATE = """
         selectUf.addEventListener('change', atualizarMunicipios);
         window.addEventListener('DOMContentLoaded', atualizarMunicipios);
 
+        // PWA Setup
         if ('serviceWorker' in navigator) {
             window.addEventListener('load', () => {
-                navigator.serviceWorker.register('/sw.js').catch(err => console.log('SW falhou: ', err));
+                navigator.serviceWorker.register('/sw.js').catch(err => console.log('SW falhou:', err));
             });
         }
-
         let deferredPrompt;
         window.addEventListener('beforeinstallprompt', (e) => {
             e.preventDefault();
             deferredPrompt = e;
             document.getElementById('pwa-banner').style.display = 'flex';
         });
-
         document.getElementById('pwa-install-btn').addEventListener('click', async () => {
             document.getElementById('pwa-banner').style.display = 'none';
             if (deferredPrompt) {
                 deferredPrompt.prompt();
-                const { outcome } = await deferredPrompt.userChoice;
                 deferredPrompt = null;
             }
         });
-
-        const isIos = () => {
-            const userAgent = window.navigator.userAgent.toLowerCase();
-            return /iphone|ipad|ipod/.test(userAgent);
-        };
+        const isIos = () => /iphone|ipad|ipod/.test(window.navigator.userAgent.toLowerCase());
         const isInStandaloneMode = () => ('standalone' in window.navigator) && (window.navigator.standalone);
-
         if (isIos() && !isInStandaloneMode()) {
-            setTimeout(() => {
-                document.getElementById('ios-banner').style.display = 'block';
-            }, 2000);
+            setTimeout(() => { document.getElementById('ios-banner').style.display = 'block'; }, 2000);
         }
     </script>
 </body>
@@ -340,11 +445,7 @@ def manifest():
         "background_color": "#f4f7f6",
         "theme_color": "#2c3e50",
         "icons": [
-            {
-                "src": "https://cdn-icons-png.flaticon.com/512/3063/3063206.png",
-                "sizes": "512x512",
-                "type": "image/png"
-            }
+            {"src": "https://cdn-icons-png.flaticon.com/512/3063/3063206.png", "sizes": "512x512", "type": "image/png"}
         ]
     }
     response = make_response(json.dumps(manifest_data))
@@ -354,12 +455,8 @@ def manifest():
 @app.route('/sw.js')
 def service_worker():
     js = """
-    self.addEventListener('install', (e) => {
-        self.skipWaiting();
-    });
-    self.addEventListener('fetch', (e) => {
-        e.respondWith(fetch(e.request).catch(() => new Response("Você está offline!")));
-    });
+    self.addEventListener('install', (e) => { self.skipWaiting(); });
+    self.addEventListener('fetch', (e) => { e.respondWith(fetch(e.request).catch(() => new Response("Offline"))); });
     """
     response = make_response(js)
     response.headers["Content-Type"] = "application/javascript"
@@ -397,7 +494,7 @@ def index():
     lista_ufs = []
     lista_redes = []
     mapa_ufs = {}
-    tabela_html = ""
+    registros = []
     total_linhas = 0
 
     try:
@@ -432,7 +529,8 @@ def index():
 
             total_linhas = len(df_filtrado)
             if total_linhas > 0:
-                tabela_html = df_filtrado.to_html(index=False, classes="", border=0)
+                # Transformamos os dados em formato de Dicionário para construir a tabela HTML personalizada
+                registros = df_filtrado.to_dict('records')
 
     except Exception as e:
         print(f"Erro ao consultar banco: {e}")
@@ -446,7 +544,7 @@ def index():
         lista_ufs=lista_ufs, 
         lista_redes=lista_redes,
         mapa_ufs_json=mapa_ufs_json,
-        tabela_html=tabela_html, 
+        registros=registros, 
         total_linhas=total_linhas
     )
 
@@ -481,27 +579,22 @@ def upload():
             flash(f"Erro: A planilha enviada não tem as colunas necessárias: {falta_coluna}", "error")
             return redirect(url_for("index"))
 
-        # Preparando os dados
         df_salvar = df[colunas_basicas].copy()
         df_salvar['DATA_VIGENCIA'] = data_vigencia
         df_salvar['ODONTO'] = odonto_flag
-        
-        # Criando a chave única IBGE + REDE para comparar o que já existe
         df_salvar['CHAVE'] = df_salvar['IBGE'].astype(str) + "_" + df_salvar['REDE'].astype(str)
 
-        # Lendo o que já tem no banco
         df_existentes = pd.read_sql('SELECT "IBGE", "REDE" FROM negociacoes_v2', engine)
         df_existentes['CHAVE'] = df_existentes['IBGE'].astype(str) + "_" + df_existentes['REDE'].astype(str)
         chaves_banco = set(df_existentes['CHAVE'].tolist())
 
-        # Separando o que é INSERT (novo) do que é UPDATE (atualização silenciosa)
         df_novos = df_salvar[~df_salvar['CHAVE'].isin(chaves_banco)].copy()
         df_atualizar = df_salvar[df_salvar['CHAVE'].isin(chaves_banco)].copy()
 
         linhas_atualizadas = 0
         linhas_inseridas = 0
 
-        # 1. Fazendo o UPDATE dos existentes silenciosamente (Sem Crítica)
+        # Atualiza os existentes
         if not df_atualizar.empty:
             with engine.connect() as conn:
                 for _, row in df_atualizar.iterrows():
@@ -512,19 +605,67 @@ def upload():
                 conn.commit()
                 linhas_atualizadas = len(df_atualizar)
 
-        # 2. Fazendo o INSERT dos novos
+        # Insere os novos
         if not df_novos.empty:
             df_novos = df_novos.drop(columns=['CHAVE'])
             df_novos.to_sql('negociacoes_v2', engine, if_exists='append', index=False)
             linhas_inseridas = len(df_novos)
 
-        flash(f"Sucesso! {linhas_inseridas} novos registros inseridos e {linhas_atualizadas} municípios existentes atualizados sem problemas.", "success")
+        flash(f"Sucesso! {linhas_inseridas} novos registros inseridos e {linhas_atualizadas} atualizados sem duplicar.", "success")
 
     except Exception as e:
         flash(f"Erro ao processar o arquivo: {str(e)}", "error")
 
     return redirect(url_for("index"))
 
+# ==========================================
+# 6. ROTAS DE EDIÇÃO E EXCLUSÃO INDIVIDUAL
+# ==========================================
+@app.route("/editar", methods=["POST"])
+def editar():
+    if "usuario" not in session or session.get("role") != "admin":
+        return redirect(url_for("index"))
+
+    ibge = request.form.get("ibge")
+    rede_antiga = request.form.get("rede_antiga")
+    nova_rede = request.form.get("nova_rede")
+    nova_vigencia = request.form.get("nova_vigencia")
+    novo_odonto = request.form.get("novo_odonto")
+
+    try:
+        with engine.connect() as conn:
+            conn.execute(
+                text('UPDATE negociacoes_v2 SET "REDE" = :n_rede, "DATA_VIGENCIA" = :n_vigencia, "ODONTO" = :n_odonto WHERE "IBGE" = :ibge AND "REDE" = :r_antiga'),
+                {"n_rede": nova_rede, "n_vigencia": nova_vigencia, "n_odonto": novo_odonto, "ibge": ibge, "r_antiga": rede_antiga}
+            )
+            conn.commit()
+        flash("Registro atualizado com sucesso!", "success")
+    except Exception as e:
+        flash(f"Erro ao atualizar registro: {str(e)}", "error")
+        
+    # Mantém o usuário na mesma tela/filtros após salvar (redireciona referer)
+    return redirect(request.referrer or url_for("index"))
+
+@app.route("/excluir", methods=["POST"])
+def excluir():
+    if "usuario" not in session or session.get("role") != "admin":
+        return redirect(url_for("index"))
+
+    ibge = request.form.get("ibge")
+    rede = request.form.get("rede")
+
+    try:
+        with engine.connect() as conn:
+            conn.execute(
+                text('DELETE FROM negociacoes_v2 WHERE "IBGE" = :ibge AND "REDE" = :rede'),
+                {"ibge": ibge, "rede": rede}
+            )
+            conn.commit()
+        flash("Registro excluído permanentemente.", "success")
+    except Exception as e:
+        flash(f"Erro ao excluir registro: {str(e)}", "error")
+        
+    return redirect(request.referrer or url_for("index"))
 
 @app.route("/exportar", methods=["POST"])
 def exportar():
