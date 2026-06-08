@@ -1,6 +1,7 @@
 import os
 import io
 import json
+from datetime import datetime
 import pandas as pd
 from flask import Flask, request, render_template_string, send_file, flash, redirect, url_for, session, make_response
 from sqlalchemy import create_engine, text
@@ -17,14 +18,17 @@ engine = create_engine(DATABASE_URL)
 def criar_tabelas():
     try:
         with engine.connect() as conn:
+            # Tabela V3 acomoda a coluna SAÚDE e o rastreio do NOME DO ARQUIVO
             conn.execute(text("""
-                CREATE TABLE IF NOT EXISTS negociacoes_v2 (
+                CREATE TABLE IF NOT EXISTS negociacoes_v3 (
                     "UF" VARCHAR(10),
                     "IBGE" VARCHAR(50),
                     "MUNICIPIO" VARCHAR(255),
                     "REDE" VARCHAR(255),
                     "DATA_VIGENCIA" VARCHAR(50),
-                    "ODONTO" VARCHAR(10)
+                    "SAUDE" VARCHAR(10),
+                    "ODONTO" VARCHAR(10),
+                    "ARQUIVO" VARCHAR(255)
                 )
             """))
             conn.commit()
@@ -32,6 +36,14 @@ def criar_tabelas():
         print(f"Erro ao criar tabelas: {e}")
 
 criar_tabelas()
+
+def formatar_data_br(data_iso):
+    """Converte YYYY-MM-DD para DD/MM/YYYY"""
+    if not data_iso: return ""
+    try:
+        return datetime.strptime(data_iso, "%Y-%m-%d").strftime("%d/%m/%Y")
+    except:
+        return data_iso
 
 # ==========================================
 # 2. USUÁRIOS DO SISTEMA
@@ -42,7 +54,7 @@ USUARIOS = {
 }
 
 # ==========================================
-# 3. INTERFACES HTML E CSS RESPONSIVO (PWA)
+# 3. INTERFACES HTML E CSS RESPONSIVO
 # ==========================================
 LOGIN_TEMPLATE = """
 <!DOCTYPE html>
@@ -87,60 +99,54 @@ HTML_TEMPLATE = """
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <meta name="theme-color" content="#2c3e50">
-    <meta name="apple-mobile-web-app-capable" content="yes">
-    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <link rel="manifest" href="/manifest.json">
     <title>Gestão de Redes de Saúde</title>
     <style>
-        :root { --primary: #2c3e50; --secondary: #3498db; --light: #f4f7f6; --success: #27ae60; --danger: #e74c3c; --warning: #f1c40f; }
+        :root { --primary: #2c3e50; --secondary: #3498db; --light: #f4f7f6; --success: #27ae60; --danger: #e74c3c; --warning: #f1c40f; --dark: #34495e; }
         body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: var(--light); color: #333; margin: 0; padding: 15px; }
-        .container { max-width: 1200px; margin: 0 auto; background: #fff; padding: 25px; border-radius: 10px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }
+        .container { max-width: 1300px; margin: 0 auto; background: #fff; padding: 25px; border-radius: 10px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }
         
         .header { display: flex; justify-content: space-between; align-items: center; border-bottom: 2px solid var(--light); padding-bottom: 15px; margin-bottom: 20px; flex-wrap: wrap; gap: 10px; }
-        h1, h2 { color: var(--primary); margin: 0; font-size: 1.5rem; }
+        h1 { color: var(--primary); margin: 0; font-size: 1.5rem; }
+        h2 { color: var(--primary); margin-top: 0; border-left: 4px solid var(--secondary); padding-left: 10px; }
         .user-info { display: flex; align-items: center; gap: 15px; }
         
         .logout-btn { background-color: var(--danger); color: white; padding: 8px 15px; text-decoration: none; border-radius: 5px; font-weight: bold; font-size: 14px; }
         
-        .form-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px; margin-bottom: 20px; }
+        .form-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 15px; margin-bottom: 20px; }
         .form-group { display: flex; flex-direction: column; }
-        label { font-weight: bold; margin-bottom: 5px; font-size: 14px; color: var(--primary); }
-        input, select { padding: 12px; border: 1px solid #ccc; border-radius: 5px; font-size: 15px; }
+        label { font-weight: bold; margin-bottom: 5px; font-size: 13px; color: var(--primary); }
+        input, select { padding: 10px; border: 1px solid #ccc; border-radius: 5px; font-size: 14px; }
         
-        .btn { background-color: var(--secondary); color: white; border: none; padding: 14px 20px; border-radius: 5px; cursor: pointer; font-size: 15px; font-weight: bold; width: 100%; text-align: center; display: inline-block; box-sizing: border-box; }
-        .btn-limpar { background-color: #95a5a6; margin-top: 10px; }
+        .btn { background-color: var(--secondary); color: white; border: none; padding: 12px 20px; border-radius: 5px; cursor: pointer; font-size: 14px; font-weight: bold; transition: 0.3s; }
+        .btn-limpar { background-color: #95a5a6; }
         .btn-export { background-color: var(--success); margin-top: 15px; }
+        .btn-full { width: 100%; }
         
-        /* Ajuste nas Tabelas */
-        .table-responsive { overflow-x: auto; margin-top: 20px; border-radius: 5px; border: 1px solid #ddd; max-height: 600px; }
-        table { width: 100%; border-collapse: collapse; min-width: 600px; }
-        th, td { border: 1px solid #ddd; padding: 12px; text-align: left; font-size: 13px; }
+        .table-responsive { overflow-x: auto; margin-top: 15px; border-radius: 5px; border: 1px solid #ddd; max-height: 500px; }
+        table { width: 100%; border-collapse: collapse; min-width: 700px; }
+        th, td { border: 1px solid #ddd; padding: 10px; text-align: left; font-size: 13px; }
         th { background-color: var(--primary); color: white; position: sticky; top: 0; z-index: 10; }
         tr:nth-child(even) { background-color: #f9f9f9; }
         tr:hover { background-color: #f1f1f1; }
         
-        /* Botões de Ação na Tabela */
-        .btn-action { padding: 6px 10px; border: none; border-radius: 4px; cursor: pointer; font-size: 14px; margin-right: 5px; transition: 0.2s; }
+        .btn-action { padding: 6px 10px; border: none; border-radius: 4px; cursor: pointer; font-size: 13px; margin-right: 5px; font-weight: bold; }
         .btn-edit { background-color: var(--warning); color: #000; }
-        .btn-edit:hover { background-color: #d4ac0d; }
         .btn-delete { background-color: var(--danger); color: #fff; }
-        .btn-delete:hover { background-color: #c0392b; }
+        .btn-lote { background-color: var(--dark); color: #fff; width: 100%; margin-bottom: 5px; }
 
         .alert { padding: 15px; margin-bottom: 20px; border-radius: 5px; color: white; font-weight: bold; line-height: 1.5; font-size: 14px; }
         .alert.success { background-color: var(--success); }
         .alert.error { background-color: var(--danger); }
         .alert.info { background-color: var(--secondary); }
+        
+        hr { border: 0; height: 1px; background-color: #ddd; margin: 30px 0; }
 
-        /* Modal (Pop-up de Edição) */
+        /* Modal */
         .modal { display: none; position: fixed; z-index: 2000; left: 0; top: 0; width: 100%; height: 100%; background-color: rgba(0,0,0,0.6); backdrop-filter: blur(3px); }
-        .modal-content { background-color: #fff; margin: 5% auto; padding: 25px; border-radius: 10px; width: 90%; max-width: 450px; box-shadow: 0 5px 15px rgba(0,0,0,0.3); }
+        .modal-content { background-color: #fff; margin: 5% auto; padding: 25px; border-radius: 10px; width: 90%; max-width: 500px; box-shadow: 0 5px 15px rgba(0,0,0,0.3); }
         .close { color: #aaa; float: right; font-size: 28px; font-weight: bold; cursor: pointer; }
         .close:hover { color: #000; }
-        .modal-content h3 { margin-top: 0; color: var(--primary); border-bottom: 2px solid var(--light); padding-bottom: 10px; }
-
-        /* Banners PWA */
-        #pwa-banner { display: none; position: fixed; bottom: 0; left: 0; width: 100%; background: var(--primary); color: white; padding: 15px; box-sizing: border-box; box-shadow: 0 -2px 10px rgba(0,0,0,0.2); z-index: 1000; justify-content: space-between; align-items: center; }
-        #ios-banner { display: none; position: fixed; bottom: 10px; left: 50%; transform: translateX(-50%); width: 90%; background: white; color: black; padding: 15px; box-sizing: border-box; border-radius: 10px; box-shadow: 0 4px 15px rgba(0,0,0,0.3); z-index: 1000; text-align: center; border: 2px solid var(--secondary); }
 
         @media (max-width: 768px) {
             .container { padding: 15px; margin-top: 5px; }
@@ -181,63 +187,108 @@ HTML_TEMPLATE = """
                     <input type="date" name="data_vigencia" required>
                 </div>
                 <div class="form-group">
+                    <label>Saúde:</label>
+                    <select name="saude_flag" required>
+                        <option value="SIM">SIM</option>
+                        <option value="NÃO">NÃO</option>
+                    </select>
+                </div>
+                <div class="form-group">
                     <label>Odonto:</label>
                     <select name="odonto_flag" required>
-                        <option value="NÃO">NÃO</option>
                         <option value="SIM">SIM</option>
+                        <option value="NÃO">NÃO</option>
                     </select>
                 </div>
             </div>
-            <button type="submit" class="btn">Processar e Salvar</button>
+            <button type="submit" class="btn btn-full">🚀 Processar e Salvar Planilha</button>
         </form>
-        <hr style="margin: 30px 0; border: 1px solid #eee;">
+        
+        <hr>
+
+        <h2>📂 Gerenciar Arquivos Importados (Lotes)</h2>
+        <div class="table-responsive" style="max-height: 300px;">
+            <table>
+                <thead>
+                    <tr>
+                        <th>NOME DO ARQUIVO</th>
+                        <th>MUNICÍPIOS VINCULADOS</th>
+                        <th style="width: 150px;">AÇÕES DO LOTE</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for lote in lotes %}
+                    <tr>
+                        <td><strong>{{ lote.ARQUIVO }}</strong></td>
+                        <td>{{ lote.QTD }}</td>
+                        <td>
+                            <button type="button" class="btn-action btn-lote" onclick="abrirModalLote('{{ lote.ARQUIVO }}')">✏️ Editar Lote</button>
+                            <form action="/excluir_lote" method="POST" style="margin:0;" onsubmit="return confirm('ATENÇÃO: Deseja excluir TODOS os {{ lote.QTD }} registros importados no arquivo {{ lote.ARQUIVO }}?');">
+                                <input type="hidden" name="arquivo" value="{{ lote.ARQUIVO }}">
+                                <button type="submit" class="btn-action btn-delete" style="width: 100%;">🗑️ Excluir Lote</button>
+                            </form>
+                        </td>
+                    </tr>
+                    {% else %}
+                    <tr><td colspan="3">Nenhum arquivo importado no banco de dados.</td></tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        <hr>
         {% endif %}
 
-        <h2>🔍 Consulta e Gerenciamento</h2>
+        <h2>🔍 Consulta de Municípios</h2>
         <form action="/" method="GET" id="formBusca">
             <div class="form-grid">
                 <div class="form-group">
                     <label>UF:</label>
                     <select name="busca_uf" id="busca_uf">
-                        <option value="">Todas</option>
+                        <option value="">-- Todas --</option>
                         {% for uf in lista_ufs %}
                             <option value="{{ uf }}" {% if request.args.get('busca_uf') == uf %}selected{% endif %}>{{ uf }}</option>
                         {% endfor %}
                     </select>
                 </div>
-                
                 <div class="form-group">
                     <label>Município:</label>
                     <input list="municipios_lista" name="busca_municipio" id="busca_municipio" placeholder="Digite..." value="{{ request.args.get('busca_municipio', '') }}" autocomplete="off">
                     <datalist id="municipios_lista"></datalist>
                 </div>
-
                 <div class="form-group">
                     <label>Rede:</label>
                     <select name="busca_rede">
-                        <option value="">Todas as Redes</option>
+                        <option value="">-- Todas as Redes --</option>
                         {% for rede in lista_redes %}
                             <option value="{{ rede }}" {% if request.args.get('busca_rede') == rede %}selected{% endif %}>{{ rede }}</option>
                         {% endfor %}
                     </select>
                 </div>
-
                 <div class="form-group">
                     <label>Data Vigência:</label>
                     <input type="date" name="busca_vigencia" value="{{ request.args.get('busca_vigencia', '') }}">
                 </div>
-                
+                <div class="form-group">
+                    <label>Saúde:</label>
+                    <select name="busca_saude">
+                        <option value="">-- Selecione --</option>
+                        <option value="SIM" {% if request.args.get('busca_saude') == 'SIM' %}selected{% endif %}>SIM</option>
+                        <option value="NÃO" {% if request.args.get('busca_saude') == 'NÃO' %}selected{% endif %}>NÃO</option>
+                    </select>
+                </div>
                 <div class="form-group">
                     <label>Odonto:</label>
                     <select name="busca_odonto">
-                        <option value="">Ambos</option>
+                        <option value="">-- Selecione --</option>
                         <option value="SIM" {% if request.args.get('busca_odonto') == 'SIM' %}selected{% endif %}>SIM</option>
                         <option value="NÃO" {% if request.args.get('busca_odonto') == 'NÃO' %}selected{% endif %}>NÃO</option>
                     </select>
                 </div>
             </div>
-            <button type="submit" class="btn">Aplicar Filtros</button>
-            <a href="/" class="btn btn-limpar">Limpar Filtros</a>
+            <div style="display: flex; gap: 10px;">
+                <button type="submit" class="btn">Aplicar Filtros</button>
+                <a href="/" class="btn btn-limpar" style="text-decoration:none; display:flex; align-items:center;">Limpar</a>
+            </div>
         </form>
 
         {% if registros %}
@@ -246,8 +297,9 @@ HTML_TEMPLATE = """
                 <input type="hidden" name="busca_municipio" value="{{ request.args.get('busca_municipio', '') }}">
                 <input type="hidden" name="busca_rede" value="{{ request.args.get('busca_rede', '') }}">
                 <input type="hidden" name="busca_vigencia" value="{{ request.args.get('busca_vigencia', '') }}">
+                <input type="hidden" name="busca_saude" value="{{ request.args.get('busca_saude', '') }}">
                 <input type="hidden" name="busca_odonto" value="{{ request.args.get('busca_odonto', '') }}">
-                <button type="submit" class="btn btn-export">📥 Exportar Excel</button>
+                <button type="submit" class="btn btn-export">📥 Exportar Tabela para Excel</button>
             </form>
             
             <p style="margin-top: 15px;"><strong>Resultados encontrados: {{ total_linhas }}</strong></p>
@@ -260,9 +312,11 @@ HTML_TEMPLATE = """
                             <th>MUNICÍPIO</th>
                             <th>REDE</th>
                             <th>DATA VIGÊNCIA</th>
+                            <th>SAÚDE</th>
                             <th>ODONTO</th>
                             {% if role == 'admin' %}
-                            <th>AÇÕES</th>
+                            <th>ARQUIVO ORIGEM</th>
+                            <th style="min-width: 90px;">AÇÕES</th>
                             {% endif %}
                         </tr>
                     </thead>
@@ -273,17 +327,20 @@ HTML_TEMPLATE = """
                             <td>{{ row.IBGE }}</td>
                             <td>{{ row.MUNICIPIO }}</td>
                             <td>{{ row.REDE }}</td>
-                            <td>{{ row.DATA_VIGENCIA }}</td>
+                            <td>{{ row.DATA_VIGENCIA_BR }}</td>
+                            <td>{{ row.SAUDE }}</td>
                             <td>{{ row.ODONTO }}</td>
                             {% if role == 'admin' %}
+                            <td style="font-size: 11px; color:#555;">{{ row.ARQUIVO }}</td>
                             <td>
                                 <button type="button" class="btn-action btn-edit" title="Editar"
                                     data-ibge="{{ row.IBGE }}" 
                                     data-mun="{{ row.MUNICIPIO }}" 
                                     data-rede="{{ row.REDE }}" 
                                     data-vig="{{ row.DATA_VIGENCIA }}" 
+                                    data-saude="{{ row.SAUDE }}" 
                                     data-odonto="{{ row.ODONTO }}" 
-                                    onclick="abrirModalEdicao(this)">✏️</button>
+                                    onclick="abrirModalIndividual(this)">✏️</button>
                                 
                                 <form action="/excluir" method="POST" style="display:inline;" onsubmit="return confirm('Tem certeza que deseja EXCLUIR {{ row.MUNICIPIO }} da rede {{ row.REDE }}?');">
                                     <input type="hidden" name="ibge" value="{{ row.IBGE }}">
@@ -302,23 +359,23 @@ HTML_TEMPLATE = """
         {% endif %}
     </div>
 
-    <div id="modalEdicao" class="modal">
+    <div id="modalIndividual" class="modal">
         <div class="modal-content">
-            <span class="close" onclick="fecharModal()">&times;</span>
-            <h3>✏️ Editar Registro</h3>
-            <p style="margin-top: 0; color: #555;">Município: <strong id="lbl_municipio"></strong></p>
-            
+            <span class="close" onclick="document.getElementById('modalIndividual').style.display='none'">&times;</span>
+            <h3 style="color:var(--primary); margin-top:0;">✏️ Editar Município</h3>
+            <p style="color: #555;">Município: <strong id="lbl_municipio"></strong></p>
             <form action="/editar" method="POST">
                 <input type="hidden" name="ibge" id="edit_ibge">
                 <input type="hidden" name="rede_antiga" id="edit_rede_antiga">
                 
-                <div class="form-group">
-                    <label>Rede:</label>
-                    <input type="text" name="nova_rede" id="edit_rede" required>
-                </div>
+                <div class="form-group"><label>Rede:</label><input type="text" name="nova_rede" id="edit_rede" required></div>
+                <div class="form-group" style="margin-top: 10px;"><label>Data Vigência:</label><input type="date" name="nova_vigencia" id="edit_vigencia" required></div>
                 <div class="form-group" style="margin-top: 10px;">
-                    <label>Data Vigência:</label>
-                    <input type="date" name="nova_vigencia" id="edit_vigencia" required>
+                    <label>Saúde:</label>
+                    <select name="novo_saude" id="edit_saude" required>
+                        <option value="SIM">SIM</option>
+                        <option value="NÃO">NÃO</option>
+                    </select>
                 </div>
                 <div class="form-group" style="margin-top: 10px;">
                     <label>Odonto:</label>
@@ -327,50 +384,73 @@ HTML_TEMPLATE = """
                         <option value="NÃO">NÃO</option>
                     </select>
                 </div>
-                <button type="submit" class="btn" style="margin-top: 20px;">💾 Salvar Alterações</button>
+                <button type="submit" class="btn btn-full" style="margin-top: 20px;">💾 Salvar Alterações</button>
             </form>
         </div>
     </div>
 
-    <div id="pwa-banner">
-        <span>📲 Instale o App para acesso rápido!</span>
-        <div>
-            <button id="pwa-install-btn" style="background:var(--success); color:white; border:none; padding:8px 15px; border-radius:5px; font-weight:bold;">Instalar</button>
-            <button onclick="document.getElementById('pwa-banner').style.display='none'" style="background:none; border:none; color:white; font-weight:bold; font-size:18px; margin-left:10px;">×</button>
+    <div id="modalLote" class="modal">
+        <div class="modal-content">
+            <span class="close" onclick="document.getElementById('modalLote').style.display='none'">&times;</span>
+            <h3 style="color:var(--dark); margin-top:0;">📦 Editar Lote de Importação</h3>
+            <p style="color: #555; font-size: 14px;">As alterações afetarão TODOS os municípios do arquivo:<br><strong id="lbl_arquivo_lote" style="word-break: break-all; color: var(--primary);"></strong></p>
+            <form action="/editar_lote" method="POST">
+                <input type="hidden" name="arquivo_lote" id="input_arquivo_lote">
+                
+                <div class="form-group">
+                    <label>Nova Rede (opcional):</label>
+                    <input type="text" name="nova_rede" placeholder="Deixe em branco para não alterar">
+                </div>
+                <div class="form-group" style="margin-top: 10px;">
+                    <label>Nova Data Vigência (opcional):</label>
+                    <input type="date" name="nova_vigencia">
+                </div>
+                <div class="form-group" style="margin-top: 10px;">
+                    <label>Alterar Saúde (opcional):</label>
+                    <select name="novo_saude">
+                        <option value="">-- Não Alterar --</option>
+                        <option value="SIM">SIM</option>
+                        <option value="NÃO">NÃO</option>
+                    </select>
+                </div>
+                <div class="form-group" style="margin-top: 10px;">
+                    <label>Alterar Odonto (opcional):</label>
+                    <select name="novo_odonto">
+                        <option value="">-- Não Alterar --</option>
+                        <option value="SIM">SIM</option>
+                        <option value="NÃO">NÃO</option>
+                    </select>
+                </div>
+                <button type="submit" class="btn btn-full" style="background-color: var(--dark); margin-top: 20px;">💾 Salvar Alteração em Lote</button>
+            </form>
         </div>
-    </div>
-    <div id="ios-banner">
-        <p style="margin: 0 0 10px 0; font-weight: bold; color: var(--primary);">📲 Instalar App no iPhone</p>
-        <p style="font-size: 13px; margin:0;">Toque em <b>Compartilhar</b> e depois em <b>"Adicionar à Tela de Início"</b>.</p>
-        <button onclick="document.getElementById('ios-banner').style.display='none'" style="margin-top:10px; width:100%; padding:8px; background:#ddd; border:none; border-radius:5px; font-weight:bold;">Entendi</button>
     </div>
 
     <script>
-        // Lógica do Modal de Edição
-        function abrirModalEdicao(btn) {
+        function abrirModalIndividual(btn) {
             document.getElementById('edit_ibge').value = btn.getAttribute('data-ibge');
             document.getElementById('lbl_municipio').innerText = btn.getAttribute('data-mun') + " (" + btn.getAttribute('data-ibge') + ")";
             document.getElementById('edit_rede_antiga').value = btn.getAttribute('data-rede');
             
             document.getElementById('edit_rede').value = btn.getAttribute('data-rede');
             document.getElementById('edit_vigencia').value = btn.getAttribute('data-vig');
+            document.getElementById('edit_saude').value = btn.getAttribute('data-saude');
             document.getElementById('edit_odonto').value = btn.getAttribute('data-odonto');
             
-            document.getElementById('modalEdicao').style.display = 'block';
+            document.getElementById('modalIndividual').style.display = 'block';
         }
 
-        function fecharModal() {
-            document.getElementById('modalEdicao').style.display = 'none';
+        function abrirModalLote(arquivo) {
+            document.getElementById('input_arquivo_lote').value = arquivo;
+            document.getElementById('lbl_arquivo_lote').innerText = arquivo;
+            document.getElementById('modalLote').style.display = 'block';
         }
 
-        // Fechar clicando fora do modal
         window.onclick = function(event) {
-            if (event.target == document.getElementById('modalEdicao')) {
-                fecharModal();
-            }
+            if (event.target == document.getElementById('modalIndividual')) document.getElementById('modalIndividual').style.display = 'none';
+            if (event.target == document.getElementById('modalLote')) document.getElementById('modalLote').style.display = 'none';
         }
 
-        // Filtros em Cascata (UF -> Municípios)
         const mapaUfs = {{ mapa_ufs_json | safe }};
         const selectUf = document.getElementById('busca_uf');
         const datalistMunicipios = document.getElementById('municipios_lista');
@@ -402,31 +482,6 @@ HTML_TEMPLATE = """
         }
         selectUf.addEventListener('change', atualizarMunicipios);
         window.addEventListener('DOMContentLoaded', atualizarMunicipios);
-
-        // PWA Setup
-        if ('serviceWorker' in navigator) {
-            window.addEventListener('load', () => {
-                navigator.serviceWorker.register('/sw.js').catch(err => console.log('SW falhou:', err));
-            });
-        }
-        let deferredPrompt;
-        window.addEventListener('beforeinstallprompt', (e) => {
-            e.preventDefault();
-            deferredPrompt = e;
-            document.getElementById('pwa-banner').style.display = 'flex';
-        });
-        document.getElementById('pwa-install-btn').addEventListener('click', async () => {
-            document.getElementById('pwa-banner').style.display = 'none';
-            if (deferredPrompt) {
-                deferredPrompt.prompt();
-                deferredPrompt = null;
-            }
-        });
-        const isIos = () => /iphone|ipad|ipod/.test(window.navigator.userAgent.toLowerCase());
-        const isInStandaloneMode = () => ('standalone' in window.navigator) && (window.navigator.standalone);
-        if (isIos() && !isInStandaloneMode()) {
-            setTimeout(() => { document.getElementById('ios-banner').style.display = 'block'; }, 2000);
-        }
     </script>
 </body>
 </html>
@@ -444,9 +499,7 @@ def manifest():
         "display": "standalone",
         "background_color": "#f4f7f6",
         "theme_color": "#2c3e50",
-        "icons": [
-            {"src": "https://cdn-icons-png.flaticon.com/512/3063/3063206.png", "sizes": "512x512", "type": "image/png"}
-        ]
+        "icons": [{"src": "https://cdn-icons-png.flaticon.com/512/3063/3063206.png", "sizes": "512x512", "type": "image/png"}]
     }
     response = make_response(json.dumps(manifest_data))
     response.headers["Content-Type"] = "application/json"
@@ -491,15 +544,18 @@ def index():
     if "usuario" not in session:
         return redirect(url_for("login"))
 
-    lista_ufs = []
-    lista_redes = []
-    mapa_ufs = {}
-    registros = []
+    lista_ufs, lista_redes, mapa_ufs, registros, lotes = [], [], {}, [], []
     total_linhas = 0
 
     try:
-        df_banco = pd.read_sql("SELECT * FROM negociacoes_v2", engine)
+        # Puxa informações para os filtros e tabela principal
+        df_banco = pd.read_sql("SELECT * FROM negociacoes_v3", engine)
         
+        # Puxa agrupamento de arquivos para o Admin (Lotes)
+        if session.get("role") == "admin":
+            df_lotes = pd.read_sql('SELECT "ARQUIVO", COUNT(*) as "QTD" FROM negociacoes_v3 GROUP BY "ARQUIVO" ORDER BY "ARQUIVO"', engine)
+            lotes = df_lotes.to_dict('records')
+
         if not df_banco.empty:
             lista_ufs = sorted(df_banco['UF'].dropna().unique())
             lista_redes = sorted(df_banco['REDE'].dropna().unique())
@@ -512,30 +568,26 @@ def index():
             busca_municipio = request.args.get('busca_municipio', '')
             busca_rede = request.args.get('busca_rede', '')
             busca_vigencia = request.args.get('busca_vigencia', '')
+            busca_saude = request.args.get('busca_saude', '')
             busca_odonto = request.args.get('busca_odonto', '')
 
             df_filtrado = df_banco.copy()
 
-            if busca_uf:
-                df_filtrado = df_filtrado[df_filtrado['UF'] == busca_uf]
-            if busca_municipio:
-                df_filtrado = df_filtrado[df_filtrado['MUNICIPIO'].str.contains(busca_municipio, case=False, na=False)]
-            if busca_rede:
-                df_filtrado = df_filtrado[df_filtrado['REDE'] == busca_rede]
-            if busca_vigencia:
-                df_filtrado = df_filtrado[df_filtrado['DATA_VIGENCIA'] == busca_vigencia]
-            if busca_odonto:
-                df_filtrado = df_filtrado[df_filtrado['ODONTO'] == busca_odonto]
+            if busca_uf: df_filtrado = df_filtrado[df_filtrado['UF'] == busca_uf]
+            if busca_municipio: df_filtrado = df_filtrado[df_filtrado['MUNICIPIO'].str.contains(busca_municipio, case=False, na=False)]
+            if busca_rede: df_filtrado = df_filtrado[df_filtrado['REDE'] == busca_rede]
+            if busca_vigencia: df_filtrado = df_filtrado[df_filtrado['DATA_VIGENCIA'] == busca_vigencia]
+            if busca_saude: df_filtrado = df_filtrado[df_filtrado['SAUDE'] == busca_saude]
+            if busca_odonto: df_filtrado = df_filtrado[df_filtrado['ODONTO'] == busca_odonto]
 
             total_linhas = len(df_filtrado)
             if total_linhas > 0:
-                # Transformamos os dados em formato de Dicionário para construir a tabela HTML personalizada
+                # Criando a coluna com data formatada no padrão BR (DD/MM/YYYY) para a tela
+                df_filtrado['DATA_VIGENCIA_BR'] = df_filtrado['DATA_VIGENCIA'].apply(formatar_data_br)
                 registros = df_filtrado.to_dict('records')
 
     except Exception as e:
         print(f"Erro ao consultar banco: {e}")
-
-    mapa_ufs_json = json.dumps(mapa_ufs)
 
     return render_template_string(
         HTML_TEMPLATE, 
@@ -543,8 +595,9 @@ def index():
         nome_usuario=session.get("nome"),
         lista_ufs=lista_ufs, 
         lista_redes=lista_redes,
-        mapa_ufs_json=mapa_ufs_json,
+        mapa_ufs_json=json.dumps(mapa_ufs),
         registros=registros, 
+        lotes=lotes,
         total_linhas=total_linhas
     )
 
@@ -556,6 +609,7 @@ def upload():
 
     arquivo = request.files.get("arquivo")
     data_vigencia = request.form.get("data_vigencia", "").strip()
+    saude_flag = request.form.get("saude_flag", "").strip()
     odonto_flag = request.form.get("odonto_flag", "").strip()
 
     if not arquivo or arquivo.filename == '':
@@ -563,16 +617,13 @@ def upload():
         return redirect(url_for("index"))
 
     try:
-        if arquivo.filename.endswith('.csv'):
-            df = pd.read_csv(arquivo, dtype=str)
-        else:
-            df = pd.read_excel(arquivo, dtype=str)
+        if arquivo.filename.endswith('.csv'): df = pd.read_csv(arquivo, dtype=str)
+        else: df = pd.read_excel(arquivo, dtype=str)
 
         colunas_basicas = ['UF', 'IBGE', 'MUNICIPIO', 'REDE']
-        colunas_finais = ['UF', 'IBGE', 'MUNICIPIO', 'REDE', 'DATA_VIGENCIA', 'ODONTO']
+        colunas_finais = ['UF', 'IBGE', 'MUNICIPIO', 'REDE', 'DATA_VIGENCIA', 'SAUDE', 'ODONTO', 'ARQUIVO']
 
-        if 'REGIAO_DE_SAUDE' in df.columns:
-            df = df.drop(columns=['REGIAO_DE_SAUDE'])
+        if 'REGIAO_DE_SAUDE' in df.columns: df = df.drop(columns=['REGIAO_DE_SAUDE'])
 
         falta_coluna = [col for col in colunas_basicas if col not in df.columns]
         if falta_coluna:
@@ -581,10 +632,13 @@ def upload():
 
         df_salvar = df[colunas_basicas].copy()
         df_salvar['DATA_VIGENCIA'] = data_vigencia
+        df_salvar['SAUDE'] = saude_flag
         df_salvar['ODONTO'] = odonto_flag
+        df_salvar['ARQUIVO'] = arquivo.filename
+        
         df_salvar['CHAVE'] = df_salvar['IBGE'].astype(str) + "_" + df_salvar['REDE'].astype(str)
 
-        df_existentes = pd.read_sql('SELECT "IBGE", "REDE" FROM negociacoes_v2', engine)
+        df_existentes = pd.read_sql('SELECT "IBGE", "REDE" FROM negociacoes_v3', engine)
         df_existentes['CHAVE'] = df_existentes['IBGE'].astype(str) + "_" + df_existentes['REDE'].astype(str)
         chaves_banco = set(df_existentes['CHAVE'].tolist())
 
@@ -599,8 +653,8 @@ def upload():
             with engine.connect() as conn:
                 for _, row in df_atualizar.iterrows():
                     conn.execute(
-                        text('UPDATE negociacoes_v2 SET "ODONTO" = :odonto, "DATA_VIGENCIA" = :vigencia WHERE "IBGE" = :ibge AND "REDE" = :rede'),
-                        {"odonto": row['ODONTO'], "vigencia": row['DATA_VIGENCIA'], "ibge": row['IBGE'], "rede": row['REDE']}
+                        text('UPDATE negociacoes_v3 SET "SAUDE" = :saude, "ODONTO" = :odonto, "DATA_VIGENCIA" = :vigencia, "ARQUIVO" = :arquivo WHERE "IBGE" = :ibge AND "REDE" = :rede'),
+                        {"saude": row['SAUDE'], "odonto": row['ODONTO'], "vigencia": row['DATA_VIGENCIA'], "arquivo": row['ARQUIVO'], "ibge": row['IBGE'], "rede": row['REDE']}
                     )
                 conn.commit()
                 linhas_atualizadas = len(df_atualizar)
@@ -608,10 +662,10 @@ def upload():
         # Insere os novos
         if not df_novos.empty:
             df_novos = df_novos.drop(columns=['CHAVE'])
-            df_novos.to_sql('negociacoes_v2', engine, if_exists='append', index=False)
+            df_novos.to_sql('negociacoes_v3', engine, if_exists='append', index=False)
             linhas_inseridas = len(df_novos)
 
-        flash(f"Sucesso! {linhas_inseridas} novos registros inseridos e {linhas_atualizadas} atualizados sem duplicar.", "success")
+        flash(f"Sucesso! {linhas_inseridas} novos inseridos e {linhas_atualizadas} atualizados a partir do arquivo '{arquivo.filename}'.", "success")
 
     except Exception as e:
         flash(f"Erro ao processar o arquivo: {str(e)}", "error")
@@ -619,93 +673,116 @@ def upload():
     return redirect(url_for("index"))
 
 # ==========================================
-# 6. ROTAS DE EDIÇÃO E EXCLUSÃO INDIVIDUAL
+# 6. ROTAS DE EDIÇÃO E EXCLUSÃO
 # ==========================================
 @app.route("/editar", methods=["POST"])
 def editar():
-    if "usuario" not in session or session.get("role") != "admin":
-        return redirect(url_for("index"))
-
-    ibge = request.form.get("ibge")
-    rede_antiga = request.form.get("rede_antiga")
-    nova_rede = request.form.get("nova_rede")
-    nova_vigencia = request.form.get("nova_vigencia")
-    novo_odonto = request.form.get("novo_odonto")
-
+    if "usuario" not in session or session.get("role") != "admin": return redirect(url_for("index"))
     try:
         with engine.connect() as conn:
             conn.execute(
-                text('UPDATE negociacoes_v2 SET "REDE" = :n_rede, "DATA_VIGENCIA" = :n_vigencia, "ODONTO" = :n_odonto WHERE "IBGE" = :ibge AND "REDE" = :r_antiga'),
-                {"n_rede": nova_rede, "n_vigencia": nova_vigencia, "n_odonto": novo_odonto, "ibge": ibge, "r_antiga": rede_antiga}
+                text('UPDATE negociacoes_v3 SET "REDE" = :n_rede, "DATA_VIGENCIA" = :n_vigencia, "SAUDE" = :n_saude, "ODONTO" = :n_odonto WHERE "IBGE" = :ibge AND "REDE" = :r_antiga'),
+                {"n_rede": request.form.get("nova_rede"), "n_vigencia": request.form.get("nova_vigencia"), "n_saude": request.form.get("novo_saude"), "n_odonto": request.form.get("novo_odonto"), "ibge": request.form.get("ibge"), "r_antiga": request.form.get("rede_antiga")}
             )
             conn.commit()
         flash("Registro atualizado com sucesso!", "success")
     except Exception as e:
-        flash(f"Erro ao atualizar registro: {str(e)}", "error")
-        
-    # Mantém o usuário na mesma tela/filtros após salvar (redireciona referer)
+        flash(f"Erro ao atualizar: {str(e)}", "error")
     return redirect(request.referrer or url_for("index"))
 
 @app.route("/excluir", methods=["POST"])
 def excluir():
-    if "usuario" not in session or session.get("role") != "admin":
-        return redirect(url_for("index"))
+    if "usuario" not in session or session.get("role") != "admin": return redirect(url_for("index"))
+    try:
+        with engine.connect() as conn:
+            conn.execute(text('DELETE FROM negociacoes_v3 WHERE "IBGE" = :ibge AND "REDE" = :rede'), {"ibge": request.form.get("ibge"), "rede": request.form.get("rede")})
+            conn.commit()
+        flash("Registro excluído permanentemente.", "success")
+    except Exception:
+        flash("Erro ao excluir registro.", "error")
+    return redirect(request.referrer or url_for("index"))
 
-    ibge = request.form.get("ibge")
-    rede = request.form.get("rede")
+@app.route("/editar_lote", methods=["POST"])
+def editar_lote():
+    if "usuario" not in session or session.get("role") != "admin": return redirect(url_for("index"))
+    
+    arquivo = request.form.get("arquivo_lote")
+    updates = []
+    params = {"arquivo": arquivo}
+
+    if request.form.get("nova_rede"):
+        updates.append('"REDE" = :rede'); params["rede"] = request.form.get("nova_rede").strip()
+    if request.form.get("nova_vigencia"):
+        updates.append('"DATA_VIGENCIA" = :vigencia'); params["vigencia"] = request.form.get("nova_vigencia")
+    if request.form.get("novo_saude"):
+        updates.append('"SAUDE" = :saude'); params["saude"] = request.form.get("novo_saude")
+    if request.form.get("novo_odonto"):
+        updates.append('"ODONTO" = :odonto'); params["odonto"] = request.form.get("novo_odonto")
+
+    if not updates:
+        flash("Nenhuma alteração foi preenchida para o lote.", "info")
+        return redirect(url_for("index"))
 
     try:
         with engine.connect() as conn:
-            conn.execute(
-                text('DELETE FROM negociacoes_v2 WHERE "IBGE" = :ibge AND "REDE" = :rede'),
-                {"ibge": ibge, "rede": rede}
-            )
+            conn.execute(text(f'UPDATE negociacoes_v3 SET {", ".join(updates)} WHERE "ARQUIVO" = :arquivo'), params)
             conn.commit()
-        flash("Registro excluído permanentemente.", "success")
+        flash(f"Lote '{arquivo}' atualizado com sucesso!", "success")
     except Exception as e:
-        flash(f"Erro ao excluir registro: {str(e)}", "error")
-        
-    return redirect(request.referrer or url_for("index"))
+        flash(f"Erro ao atualizar lote: {str(e)}", "error")
+
+    return redirect(url_for("index"))
+
+@app.route("/excluir_lote", methods=["POST"])
+def excluir_lote():
+    if "usuario" not in session or session.get("role") != "admin": return redirect(url_for("index"))
+    arquivo = request.form.get("arquivo")
+    try:
+        with engine.connect() as conn:
+            conn.execute(text('DELETE FROM negociacoes_v3 WHERE "ARQUIVO" = :arquivo'), {"arquivo": arquivo})
+            conn.commit()
+        flash(f"Todos os registros do lote '{arquivo}' foram excluídos.", "success")
+    except Exception:
+        flash("Erro ao excluir lote.", "error")
+    return redirect(url_for("index"))
 
 @app.route("/exportar", methods=["POST"])
 def exportar():
-    if "usuario" not in session:
-        return redirect(url_for("login"))
-
+    if "usuario" not in session: return redirect(url_for("login"))
     try:
-        busca_uf = request.form.get('busca_uf', '').upper()
-        busca_municipio = request.form.get('busca_municipio', '')
-        busca_rede = request.form.get('busca_rede', '')
-        busca_vigencia = request.form.get('busca_vigencia', '')
-        busca_odonto = request.form.get('busca_odonto', '')
-
-        df_banco = pd.read_sql("SELECT * FROM negociacoes_v2", engine)
+        df_banco = pd.read_sql("SELECT * FROM negociacoes_v3", engine)
         df_filtrado = df_banco.copy()
 
-        if busca_uf:
-            df_filtrado = df_filtrado[df_filtrado['UF'] == busca_uf]
-        if busca_municipio:
-            df_filtrado = df_filtrado[df_filtrado['MUNICIPIO'].str.contains(busca_municipio, case=False, na=False)]
-        if busca_rede:
-            df_filtrado = df_filtrado[df_filtrado['REDE'] == busca_rede]
-        if busca_vigencia:
-            df_filtrado = df_filtrado[df_filtrado['DATA_VIGENCIA'] == busca_vigencia]
-        if busca_odonto:
-            df_filtrado = df_filtrado[df_filtrado['ODONTO'] == busca_odonto]
+        busca_uf = request.form.get('busca_uf', '').upper()
+        if busca_uf: df_filtrado = df_filtrado[df_filtrado['UF'] == busca_uf]
+        
+        busca_municipio = request.form.get('busca_municipio', '')
+        if busca_municipio: df_filtrado = df_filtrado[df_filtrado['MUNICIPIO'].str.contains(busca_municipio, case=False, na=False)]
+        
+        busca_rede = request.form.get('busca_rede', '')
+        if busca_rede: df_filtrado = df_filtrado[df_filtrado['REDE'] == busca_rede]
+        
+        busca_vigencia = request.form.get('busca_vigencia', '')
+        if busca_vigencia: df_filtrado = df_filtrado[df_filtrado['DATA_VIGENCIA'] == busca_vigencia]
+        
+        busca_saude = request.form.get('busca_saude', '')
+        if busca_saude: df_filtrado = df_filtrado[df_filtrado['SAUDE'] == busca_saude]
+
+        busca_odonto = request.form.get('busca_odonto', '')
+        if busca_odonto: df_filtrado = df_filtrado[df_filtrado['ODONTO'] == busca_odonto]
+
+        # Formata as datas para exportação
+        if not df_filtrado.empty:
+            df_filtrado['DATA_VIGENCIA'] = df_filtrado['DATA_VIGENCIA'].apply(formatar_data_br)
 
         buffer = io.BytesIO()
         with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
             df_filtrado.to_excel(writer, index=False, sheet_name='Negociacoes_Vigentes')
         buffer.seek(0)
 
-        return send_file(
-            buffer,
-            as_attachment=True,
-            download_name="municipios_negociados.xlsx",
-            mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-        )
+        return send_file(buffer, as_attachment=True, download_name="municipios_negociados.xlsx", mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
     except Exception as e:
-        flash(f"Erro ao gerar Excel: {str(e)}", "error")
+        flash("Erro ao gerar Excel.", "error")
         return redirect(url_for("index"))
 
 if __name__ == "__main__":
