@@ -18,7 +18,6 @@ engine = create_engine(DATABASE_URL)
 def criar_tabelas():
     try:
         with engine.connect() as conn:
-            # Tabela V3 acomoda a coluna SAÚDE e o rastreio do NOME DO ARQUIVO
             conn.execute(text("""
                 CREATE TABLE IF NOT EXISTS negociacoes_v3 (
                     "UF" VARCHAR(10),
@@ -223,7 +222,7 @@ HTML_TEMPLATE = """
                         <td>{{ lote.QTD }}</td>
                         <td>
                             <button type="button" class="btn-action btn-lote" onclick="abrirModalLote('{{ lote.ARQUIVO }}')">✏️ Editar Lote</button>
-                            <form action="/excluir_lote" method="POST" style="margin:0;" onsubmit="return confirm('ATENÇÃO: Deseja excluir TODOS os {{ lote.QTD }} registros importados no arquivo {{ lote.ARQUIVO }}?');">
+                            <form action="/excluir_lote" method="POST" style="margin:0;" onsubmit="return confirm('ATENÇÃO: Deseja excluir TODOS os {{ lote.QTD }} registros vinculados ao arquivo {{ lote.ARQUIVO }}?');">
                                 <input type="hidden" name="arquivo" value="{{ lote.ARQUIVO }}">
                                 <button type="submit" class="btn-action btn-delete" style="width: 100%;">🗑️ Excluir Lote</button>
                             </form>
@@ -548,10 +547,8 @@ def index():
     total_linhas = 0
 
     try:
-        # Puxa informações para os filtros e tabela principal
         df_banco = pd.read_sql("SELECT * FROM negociacoes_v3", engine)
         
-        # Puxa agrupamento de arquivos para o Admin (Lotes)
         if session.get("role") == "admin":
             df_lotes = pd.read_sql('SELECT "ARQUIVO", COUNT(*) as "QTD" FROM negociacoes_v3 GROUP BY "ARQUIVO" ORDER BY "ARQUIVO"', engine)
             lotes = df_lotes.to_dict('records')
@@ -582,7 +579,6 @@ def index():
 
             total_linhas = len(df_filtrado)
             if total_linhas > 0:
-                # Criando a coluna com data formatada no padrão BR (DD/MM/YYYY) para a tela
                 df_filtrado['DATA_VIGENCIA_BR'] = df_filtrado['DATA_VIGENCIA'].apply(formatar_data_br)
                 registros = df_filtrado.to_dict('records')
 
@@ -638,9 +634,13 @@ def upload():
         
         df_salvar['CHAVE'] = df_salvar['IBGE'].astype(str) + "_" + df_salvar['REDE'].astype(str)
 
-        df_existentes = pd.read_sql('SELECT "IBGE", "REDE" FROM negociacoes_v3', engine)
-        df_existentes['CHAVE'] = df_existentes['IBGE'].astype(str) + "_" + df_existentes['REDE'].astype(str)
-        chaves_banco = set(df_existentes['CHAVE'].tolist())
+        df_existentes = pd.read_sql('SELECT "IBGE", "REDE", "SAUDE", "ODONTO" FROM negociacoes_v3', engine)
+        
+        if not df_existentes.empty:
+            df_existentes['CHAVE'] = df_existentes['IBGE'].astype(str) + "_" + df_existentes['REDE'].astype(str)
+            chaves_banco = set(df_existentes['CHAVE'].tolist())
+        else:
+            chaves_banco = set()
 
         df_novos = df_salvar[~df_salvar['CHAVE'].isin(chaves_banco)].copy()
         df_atualizar = df_salvar[df_salvar['CHAVE'].isin(chaves_banco)].copy()
@@ -648,24 +648,34 @@ def upload():
         linhas_atualizadas = 0
         linhas_inseridas = 0
 
-        # Atualiza os existentes
+        # ==============================================================
+        # MÁGICA DA SOMA DO "SIM" E PRESERVAÇÃO DO ARQUIVO ORIGINAL
+        # ==============================================================
         if not df_atualizar.empty:
+            df_atualizar = pd.merge(df_atualizar, df_existentes[['CHAVE', 'SAUDE', 'ODONTO']], on='CHAVE', suffixes=('', '_DB'))
+            
             with engine.connect() as conn:
                 for _, row in df_atualizar.iterrows():
+                    
+                    # Se já era SIM no banco ou veio SIM agora na planilha, fica SIM. Senão fica NÃO.
+                    saude_final = "SIM" if (str(row.get('SAUDE_DB', '')).strip().upper() == "SIM" or str(row['SAUDE']).strip().upper() == "SIM") else "NÃO"
+                    odonto_final = "SIM" if (str(row.get('ODONTO_DB', '')).strip().upper() == "SIM" or str(row['ODONTO']).strip().upper() == "SIM") else "NÃO"
+                    
+                    # Não alteramos a coluna "ARQUIVO". Ela mantém o nome de quando o município foi inserido a primeira vez.
                     conn.execute(
-                        text('UPDATE negociacoes_v3 SET "SAUDE" = :saude, "ODONTO" = :odonto, "DATA_VIGENCIA" = :vigencia, "ARQUIVO" = :arquivo WHERE "IBGE" = :ibge AND "REDE" = :rede'),
-                        {"saude": row['SAUDE'], "odonto": row['ODONTO'], "vigencia": row['DATA_VIGENCIA'], "arquivo": row['ARQUIVO'], "ibge": row['IBGE'], "rede": row['REDE']}
+                        text('UPDATE negociacoes_v3 SET "SAUDE" = :saude, "ODONTO" = :odonto, "DATA_VIGENCIA" = :vigencia WHERE "IBGE" = :ibge AND "REDE" = :rede'),
+                        {"saude": saude_final, "odonto": odonto_final, "vigencia": row['DATA_VIGENCIA'], "ibge": row['IBGE'], "rede": row['REDE']}
                     )
                 conn.commit()
                 linhas_atualizadas = len(df_atualizar)
 
-        # Insere os novos
+        # Insere os novos com as flags e o nome do arquivo atual
         if not df_novos.empty:
             df_novos = df_novos.drop(columns=['CHAVE'])
             df_novos.to_sql('negociacoes_v3', engine, if_exists='append', index=False)
             linhas_inseridas = len(df_novos)
 
-        flash(f"Sucesso! {linhas_inseridas} novos inseridos e {linhas_atualizadas} atualizados a partir do arquivo '{arquivo.filename}'.", "success")
+        flash(f"Sucesso! {linhas_inseridas} novos inseridos e {linhas_atualizadas} atualizados (preservando o lote original e acumulando os SIMs).", "success")
 
     except Exception as e:
         flash(f"Erro ao processar o arquivo: {str(e)}", "error")
@@ -771,7 +781,6 @@ def exportar():
         busca_odonto = request.form.get('busca_odonto', '')
         if busca_odonto: df_filtrado = df_filtrado[df_filtrado['ODONTO'] == busca_odonto]
 
-        # Formata as datas para exportação
         if not df_filtrado.empty:
             df_filtrado['DATA_VIGENCIA'] = df_filtrado['DATA_VIGENCIA'].apply(formatar_data_br)
 
