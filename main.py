@@ -264,10 +264,6 @@ HTML_TEMPLATE = """
                     </select>
                 </div>
                 <div class="form-group">
-                    <label>Data Vigência:</label>
-                    <input type="date" name="busca_vigencia" value="{{ request.args.get('busca_vigencia', '') }}">
-                </div>
-                <div class="form-group">
                     <label>Saúde:</label>
                     <select name="busca_saude">
                         <option value="">-- Selecione --</option>
@@ -295,7 +291,6 @@ HTML_TEMPLATE = """
                 <input type="hidden" name="busca_uf" value="{{ request.args.get('busca_uf', '') }}">
                 <input type="hidden" name="busca_municipio" value="{{ request.args.get('busca_municipio', '') }}">
                 <input type="hidden" name="busca_rede" value="{{ request.args.get('busca_rede', '') }}">
-                <input type="hidden" name="busca_vigencia" value="{{ request.args.get('busca_vigencia', '') }}">
                 <input type="hidden" name="busca_saude" value="{{ request.args.get('busca_saude', '') }}">
                 <input type="hidden" name="busca_odonto" value="{{ request.args.get('busca_odonto', '') }}">
                 <button type="submit" class="btn btn-export">📥 Exportar Tabela para Excel</button>
@@ -564,7 +559,6 @@ def index():
             busca_uf = request.args.get('busca_uf', '').upper()
             busca_municipio = request.args.get('busca_municipio', '')
             busca_rede = request.args.get('busca_rede', '')
-            busca_vigencia = request.args.get('busca_vigencia', '')
             busca_saude = request.args.get('busca_saude', '')
             busca_odonto = request.args.get('busca_odonto', '')
 
@@ -573,7 +567,6 @@ def index():
             if busca_uf: df_filtrado = df_filtrado[df_filtrado['UF'] == busca_uf]
             if busca_municipio: df_filtrado = df_filtrado[df_filtrado['MUNICIPIO'].str.contains(busca_municipio, case=False, na=False)]
             if busca_rede: df_filtrado = df_filtrado[df_filtrado['REDE'] == busca_rede]
-            if busca_vigencia: df_filtrado = df_filtrado[df_filtrado['DATA_VIGENCIA'] == busca_vigencia]
             if busca_saude: df_filtrado = df_filtrado[df_filtrado['SAUDE'] == busca_saude]
             if busca_odonto: df_filtrado = df_filtrado[df_filtrado['ODONTO'] == busca_odonto]
 
@@ -771,9 +764,6 @@ def exportar():
         
         busca_rede = request.form.get('busca_rede', '')
         if busca_rede: df_filtrado = df_filtrado[df_filtrado['REDE'] == busca_rede]
-        
-        busca_vigencia = request.form.get('busca_vigencia', '')
-        if busca_vigencia: df_filtrado = df_filtrado[df_filtrado['DATA_VIGENCIA'] == busca_vigencia]
         
         busca_saude = request.form.get('busca_saude', '')
         if busca_saude: df_filtrado = df_filtrado[df_filtrado['SAUDE'] == busca_saude]
