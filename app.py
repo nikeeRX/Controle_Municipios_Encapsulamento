@@ -158,7 +158,7 @@ HTML_TEMPLATE = """
 <body>
     <div class="container">
         <div class="header">
-            <h1>🏥 Gestão de Redes</h1>
+            <h1>🏥 Gestão de Rede Pré Pagamento</h1>
             <div class="user-info">
                 <span style="font-weight: bold; color: var(--primary);">Olá, {{ nome_usuario }}!</span>
                 <a href="/logout" class="logout-btn">Sair</a>
