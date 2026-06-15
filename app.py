@@ -63,7 +63,7 @@ LOGIN_TEMPLATE = """
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <meta name="theme-color" content="#2c3e50">
     <link rel="manifest" href="/manifest.json">
-    <title>Login - Gestão de Redes</title>
+    <title>Login - Gestão de Rede Pré Pagamento</title>
     <style>
         body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: #f4f7f6; display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; padding: 20px; box-sizing: border-box; }
         .login-box { background: white; padding: 30px; border-radius: 10px; box-shadow: 0 4px 10px rgba(0,0,0,0.1); width: 100%; max-width: 400px; text-align: center; }
@@ -349,7 +349,7 @@ HTML_TEMPLATE = """
                 </table>
             </div>
         {% else %}
-            <div class="alert info" style="margin-top: 20px;">O banco está vazio ou nenhum dado corresponde aos filtros.</div>
+            <div class="alert info" style="margin-top: 20px;">Não foram encontradas informações.</div>
         {% endif %}
     </div>
 
