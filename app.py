@@ -99,7 +99,7 @@ HTML_TEMPLATE = """
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <meta name="theme-color" content="#2c3e50">
     <link rel="manifest" href="/manifest.json">
-    <title>Gestão de Redes de Saúde</title>
+    <title>Gestão de Rede Pré Pagamento</title>
     <style>
         :root { --primary: #2c3e50; --secondary: #3498db; --light: #f4f7f6; --success: #27ae60; --danger: #e74c3c; --warning: #f1c40f; --dark: #34495e; }
         body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: var(--light); color: #333; margin: 0; padding: 15px; }
