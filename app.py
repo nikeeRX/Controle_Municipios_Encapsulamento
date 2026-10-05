@@ -13,6 +13,13 @@ app.secret_key = "chave_super_secreta_sistema_redes"
 # 1. CONFIGURAÇÃO E CRIAÇÃO DO BANCO
 # ==========================================
 DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://postgres:hMNxRensWWNVbiZJuMRBVCawLZfPSQXo@postgres.railway.internal:5432/railway")
+
+# MÁGICA AQUI: Forçar o SQLAlchemy a usar o psycopg2 independentemente do que o Railway mandar
+if DATABASE_URL.startswith("postgres://"):
+    DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql+psycopg2://", 1)
+elif DATABASE_URL.startswith("postgresql://"):
+    DATABASE_URL = DATABASE_URL.replace("postgresql://", "postgresql+psycopg2://", 1)
+
 engine = create_engine(DATABASE_URL)
 
 def criar_tabelas():
